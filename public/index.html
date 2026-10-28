@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FRONTLINE</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }</script>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <!-- ================= IN-GAME HUD ================= -->
+  <div id="hud" class="hidden">
+    <div id="vignette"></div>
+    <div id="flash"></div>
+    <div id="scope" class="hidden"><div class="reticle"></div></div>
+    <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><b></b></div>
+    <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+    <div id="dmgdirs"></div>
+
+    <canvas id="radar" width="180" height="180"></canvas>
+    <div id="ping"></div>
+
+    <div id="topbar">
+      <div class="sc me"><span class="lbl">YOU</span><span id="scoreMe">0</span></div>
+      <div id="timer">10:00</div>
+      <div class="sc top"><span class="lbl" id="scoreTopName">—</span><span id="scoreTop">0</span></div>
+    </div>
+
+    <div id="killfeed"></div>
+    <div id="notify"></div>
+    <div id="countdown" class="hidden"></div>
+    <div id="nuke" class="hidden"><div class="nt">☢ TACTICAL NUKE INCOMING ☢</div><div id="nukeCount">10</div><div id="nukeBy"></div></div>
+    <div id="nukeReady" class="hidden">☢ NUKE READY — PRESS <kbd>N</kbd></div>
+    <div id="nukeflash"></div>
+    <div id="reloadmsg" class="hidden"></div>
+
+    <div id="health">
+      <div class="hplbl">HEALTH</div>
+      <div id="hpbar"><div id="hpfill"></div></div>
+      <span id="hptext">100</span>
+    </div>
+    <div id="ammo">
+      <div id="wname"></div>
+      <div class="ammonum"><span id="mag">30</span><span class="sep">/</span><span id="reserve">90</span></div>
+      <div id="wslots"></div>
+      <div id="equip"><span id="eqFrag"></span><span id="eqSmoke"></span></div>
+    </div>
+
+    <div id="death" class="hidden">
+      <div class="big">ELIMINATED</div>
+      <div id="deathBy"></div>
+      <div id="respawnIn"></div>
+      <div class="muted">Press 1–4 to change loadout for your next life</div>
+      <div id="deathLoadouts" class="cards mini"></div>
+    </div>
+
+    <div id="scoreboard" class="hidden">
+      <div id="sbMap"></div>
+      <table id="sbTable"></table>
+    </div>
+
+    <div id="pause" class="hidden">
+      <div class="panel">
+        <div id="pauseTitle" class="logo small">PAUSED</div>
+        <button id="btnResume" class="btn primary">RESUME</button>
+        <h3>LOADOUT</h3>
+        <div id="pauseLoadouts" class="cards mini"></div>
+        <div id="pauseLoNote" class="muted"></div>
+        <h3>SETTINGS</h3>
+        <label class="slider">Sensitivity <input id="sens" type="range" min="0.2" max="3" step="0.05"><span id="sensVal"></span></label>
+        <label class="slider">Field of view <input id="fov" type="range" min="65" max="105" step="1"><span id="fovVal"></span></label>
+        <label class="slider">Volume <input id="vol" type="range" min="0" max="1" step="0.05"><span id="volVal"></span></label>
+        <button id="btnLeaveMatch" class="btn ghost">LEAVE MATCH</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MAIN MENU ================= -->
+  <div id="menu" class="screen">
+    <div class="panel">
+      <h1 class="logo">FRONTLINE</h1>
+      <div class="sub">PRIVATE MATCH • FREE-FOR-ALL</div>
+      <label>CALLSIGN</label>
+      <input id="name" maxlength="16" placeholder="Enter your name" autocomplete="off">
+      <button id="btnCreate" class="btn primary">CREATE PRIVATE MATCH</button>
+      <div class="or">— OR JOIN A FRIEND —</div>
+      <div class="row">
+        <input id="joinCode" maxlength="6" placeholder="MATCH CODE" autocomplete="off">
+        <button id="btnJoin" class="btn">JOIN</button>
+      </div>
+      <div class="or">— OR PLAY OFFLINE —</div>
+      <button id="btnOffline" class="btn">DEATHMATCH VS BOTS</button>
+      <div id="menuErr" class="err"></div>
+    </div>
+    <div class="controls">
+      <span><kbd>WASD</kbd> Move</span><span><kbd>SHIFT</kbd> Sprint</span><span><kbd>SPACE</kbd> Jump</span>
+      <span><kbd>C</kbd> Crouch / Slide</span><span><kbd>F</kbd> (hold) Aim</span><span><kbd>LMB</kbd> Fire</span>
+      <span><kbd>R</kbd> Reload</span><span><kbd>1</kbd><kbd>2</kbd><kbd>Q</kbd> Swap</span><span><kbd>T</kbd> Frag</span><span><kbd>Y</kbd> Smoke</span><span><kbd>N</kbd> Nuke (20 kills)</span><span><kbd>TAB</kbd> Scores</span><span><kbd>ESC</kbd> Pause</span>
+    </div>
+  </div>
+
+  <!-- ================= LOBBY ================= -->
+  <div id="lobby" class="screen hidden">
+    <div class="lobbywrap">
+      <div class="col">
+        <div class="codebox">
+          <div class="lbl">MATCH CODE</div>
+          <div id="codeText">------</div>
+          <button id="btnCopy" class="btn small">COPY INVITE</button>
+        </div>
+        <h3>PLAYERS <span id="pcount"></span></h3>
+        <ul id="plist"></ul>
+        <button id="btnLeave" class="btn ghost">LEAVE</button>
+      </div>
+      <div class="col wide">
+        <h3>MAP <span id="mapHint" class="muted"></span></h3>
+        <div id="maps" class="cards"></div>
+        <h3>LOADOUT</h3>
+        <div id="loadouts" class="cards"></div>
+        <button id="btnStart" class="btn primary big">START MATCH</button>
+        <div id="waitHost" class="muted">Waiting for the host to start the match…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= OFFLINE DEATHMATCH SETUP ================= -->
+  <div id="offline" class="screen hidden">
+    <div class="lobbywrap">
+      <div class="col wide">
+        <div class="logo small">DEATHMATCH</div>
+        <div class="sub">OFFLINE • YOU VS BOTS • FIRST TO 30</div>
+        <h3>MAP</h3>
+        <div id="offMaps" class="cards"></div>
+        <div class="opts">
+          <div><h3>BOTS</h3><div id="offBots" class="seg"></div></div>
+          <div><h3>DIFFICULTY</h3><div id="offDiff" class="seg"></div></div>
+        </div>
+        <h3>LOADOUT</h3>
+        <div id="offLoadouts" class="cards"></div>
+        <div class="row end">
+          <button id="btnOffBack" class="btn ghost">BACK</button>
+          <button id="btnOffStart" class="btn primary big">START DEATHMATCH</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= LOADING ================= -->
+  <div id="loading" class="screen hidden">
+    <div class="loadbox">
+      <div id="loadMap" class="logo"></div>
+      <div id="loadText">LOADING…</div>
+      <div class="bar"><div id="loadBar"></div></div>
+      <div id="loadTip" class="muted"></div>
+    </div>
+  </div>
+
+  <!-- ================= END ================= -->
+  <div id="end" class="screen hidden">
+    <div class="panel wide">
+      <div id="endTitle" class="logo">MATCH OVER</div>
+      <div id="endWinner" class="sub"></div>
+      <table id="endTable"></table>
+      <button id="btnEndLobby" class="btn primary">BACK TO LOBBY</button>
+    </div>
+  </div>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>
