@@ -25,11 +25,12 @@
     <div id="ping"></div>
 
     <div id="topbar">
-      <div class="sc me"><span class="lbl">YOU</span><span id="scoreMe">0</span></div>
+      <div class="sc me"><span class="lbl" id="scoreMeName">YOU</span><span id="scoreMe">0</span></div>
       <div id="timer">10:00</div>
       <div class="sc top"><span class="lbl" id="scoreTopName">—</span><span id="scoreTop">0</span></div>
     </div>
 
+    <div id="obj"></div>
     <div id="killfeed"></div>
     <div id="notify"></div>
     <div id="countdown" class="hidden"></div>
@@ -83,7 +84,7 @@
   <div id="menu" class="screen">
     <div class="panel">
       <h1 class="logo">FRONTLINE</h1>
-      <div class="sub">PRIVATE MATCH • FREE-FOR-ALL</div>
+      <div class="sub">PRIVATE MATCH • DEATHMATCH • DOMINATION • HARDPOINT • INFECTED</div>
       <label>CALLSIGN</label>
       <input id="name" maxlength="16" placeholder="Enter your name" autocomplete="off">
       <button id="btnCreate" class="btn primary">CREATE PRIVATE MATCH</button>
@@ -93,7 +94,7 @@
         <button id="btnJoin" class="btn">JOIN</button>
       </div>
       <div class="or">— OR PLAY OFFLINE —</div>
-      <button id="btnOffline" class="btn">DEATHMATCH VS BOTS</button>
+      <button id="btnOffline" class="btn">PLAY VS BOTS</button>
       <div id="menuErr" class="err"></div>
     </div>
     <div class="controls">
@@ -117,6 +118,8 @@
         <button id="btnLeave" class="btn ghost">LEAVE</button>
       </div>
       <div class="col wide">
+        <h3>MODE <span id="modeHint" class="muted"></span></h3>
+        <div id="modes" class="cards"></div>
         <h3>MAP <span id="mapHint" class="muted"></span></h3>
         <div id="maps" class="cards"></div>
         <h3>LOADOUT</h3>
@@ -131,8 +134,10 @@
   <div id="offline" class="screen hidden">
     <div class="lobbywrap">
       <div class="col wide">
-        <div class="logo small">DEATHMATCH</div>
-        <div class="sub">OFFLINE • YOU VS BOTS • FIRST TO 30</div>
+        <div class="logo small">BOT MATCH</div>
+        <div class="sub">OFFLINE • YOU VS BOTS</div>
+        <h3>MODE</h3>
+        <div id="offModes" class="cards"></div>
         <h3>MAP</h3>
         <div id="offMaps" class="cards"></div>
         <div class="opts">
@@ -143,7 +148,7 @@
         <div id="offLoadouts" class="cards"></div>
         <div class="row end">
           <button id="btnOffBack" class="btn ghost">BACK</button>
-          <button id="btnOffStart" class="btn primary big">START DEATHMATCH</button>
+          <button id="btnOffStart" class="btn primary big">START MATCH</button>
         </div>
       </div>
     </div>

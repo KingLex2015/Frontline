@@ -15,6 +15,7 @@ const WEAPONS = {
   titan:   { name: 'TITAN LMG',   cls: 'Light Machine Gun', dmg: 31,  head: 1.5, rpm: 680, auto: true,  mag: 100, reserve: 200, reload: 4.6, hip: 0.05,  ads: 0.005, recoil: 0.013, kick: 0.07, adsFov: 50, adsTime: 0.38, move: 0.86, range: 55,  snd: { f: 1900, d: 0.3,  thump: 1.3 }, model: 'lmg' },
   longbow: { name: 'LONGBOW .50', cls: 'Sniper Rifle',      dmg: 115, head: 2.0, rpm: 48,  auto: false, mag: 5,   reserve: 25,  reload: 3.3, hip: 0.09,  ads: 0,     recoil: 0.06,  kick: 0.22, adsFov: 18, adsTime: 0.32, move: 0.9,  range: 999, snd: { f: 1500, d: 0.6,  thump: 1.7 }, model: 'sniper', scope: true },
   ranger:  { name: 'RANGER DMR',  cls: 'Marksman Rifle',    dmg: 52,  head: 2.1, rpm: 320, auto: false, mag: 12,  reserve: 60,  reload: 2.6, hip: 0.06,  ads: 0.001, recoil: 0.03,  kick: 0.12, adsFov: 30, adsTime: 0.27, move: 0.94, range: 999, snd: { f: 2100, d: 0.4,  thump: 1.2 }, model: 'dmr', scope: true },
+  knife:   { name: 'COMBAT KNIFE', cls: 'Melee',            dmg: 150, head: 1,   rpm: 100, auto: true,  mag: 1,   reserve: 0,   reload: 0,   hip: 0,     ads: 0,     recoil: 0,     kick: 0,    adsFov: 80, adsTime: 0.2,  move: 1.2,  range: 2.6, snd: { f: 1800, d: 0.12, thump: 0 },   model: 'knife', melee: true },
   p11:     { name: 'P-11',        cls: 'Pistol',            dmg: 30,  head: 1.5, rpm: 420, auto: false, mag: 12,  reserve: 60,  reload: 1.4, hip: 0.02,  ads: 0.006, recoil: 0.016, kick: 0.08, adsFov: 65, adsTime: 0.12, move: 1.05, range: 18,  snd: { f: 3000, d: 0.14, thump: 0.5 }, model: 'pistol' },
 };
 
@@ -25,9 +26,21 @@ const LOADOUTS = {
   marksman: { name: 'MARKSMAN', desc: 'Two snipers: Longbow .50 + Ranger DMR.', weapons: ['longbow', 'ranger'] },
 };
 
+const MODES = {
+  ffa: { name: 'DEATHMATCH', desc: 'Free-for-all. Every soldier for themselves. First to 30 kills.', teams: false },
+  dom: { name: 'DOMINATION', desc: 'Two teams fight over flags A, B and C. Each flag you hold scores. First to 200.', teams: true },
+  hp:  { name: 'HARDPOINT',  desc: 'Stand in the hill to score. It moves every minute. First to 150.', teams: true },
+  inf: { name: 'INFECTED',   desc: 'One zombie with a knife. Everyone it kills turns. Survive 5 minutes.', teams: true },
+};
+const TEAM_NAMES = { dom: ['RANGERS', 'SPECTRE'], hp: ['RANGERS', 'SPECTRE'], inf: ['SURVIVORS', 'INFECTED'] };
+const TEAM_COLORS = ['#4aa3ff', '#ff4a3d'];
+const TEAM_CLOTH = [0x34506e, 0x6e3630];
+const ZOMBIE_GREEN = '#8fdc3a';
+const DOM_R = 3.5, HP_R = 4, HP_ROTATE_MS = 60000; // must match server.py
+
 const PLAYER_COLORS = [0x4a5e3a, 0x6a5638, 0x3e5068, 0x6a3c36, 0x584270, 0x3c625c, 0x6c6a3c, 0x7a5030, 0x2e4e72, 0x50642e, 0x6a3058, 0x484848];
 
-const settings = Object.assign({ sens: 1, fov: 80, vol: 0.7, name: '', loadout: 'assault', offMap: 'harbor', offBots: 5, offDiff: 'normal' },
+const settings = Object.assign({ sens: 1, fov: 80, vol: 0.7, name: '', loadout: 'assault', offMap: 'harbor', offMode: 'ffa', offBots: 5, offDiff: 'normal' },
   (() => { try { return JSON.parse(localStorage.getItem('frontline-settings')) || {}; } catch { return {}; } })());
 function saveSettings() { try { localStorage.setItem('frontline-settings', JSON.stringify(settings)); } catch {} }
 
@@ -357,6 +370,7 @@ class Builder {
 const MAPS = {
   harbor: {
     name: 'HARBOR', desc: 'Container yard • mid-range lanes', half: 44,
+    zones: { dom: [[-23.5, -6], [-4.5, 7.5], [32, 0]], hp: [[-4.5, 7.5], [5.5, -25.5], [32, 0], [0, 23], [-23.5, -6]] },
     env: { sky: [0x4f86c9, 0xd8e4ee], fog: [0xc4d2de, 50, 200], sun: [0xfff0d8, 3.2, [45, 70, 30]], hemi: [0xbcd4ff, 0x5c5244, 1.1], exposure: 1.0 },
     build(b) {
       const r = mulberry32(1337);
@@ -389,6 +403,7 @@ const MAPS = {
   },
   dust: {
     name: 'DUST', desc: 'Desert town • streets & buildings', half: 48,
+    zones: { dom: [[-30, 2.5], [-6, 0], [30, -3.5]], hp: [[-6, 0], [0, -16], [18, 0], [0, 24], [-18, 0]] },
     env: { sky: [0x6f9ccf, 0xf2dcb4], fog: [0xe6d3b0, 45, 190], sun: [0xffe2b0, 3.6, [-50, 60, 20]], hemi: [0xd8e4f0, 0x8a6a44, 1.0], exposure: 1.0 },
     build(b) {
       const r = mulberry32(42);
@@ -425,6 +440,7 @@ const MAPS = {
   },
   foundry: {
     name: 'FOUNDRY', desc: 'Warehouse at dusk • close quarters & raised deck', half: 38,
+    zones: { dom: [[-27, 0], [0, -7.5], [27.5, 0]], hp: [[0, -7.5], [0, -26.5], [22, -4.5], [0, 17.5], [-22, -4.5]] },
     env: { sky: [0x2e3a5a, 0xe08a4a], fog: [0x7a6050, 30, 150], sun: [0xffb070, 2.8, [-40, 38, -30]], hemi: [0x8090b0, 0x4a3a30, 1.0], exposure: 1.05 },
     build(b) {
       b.ground('concrete', 150);
@@ -520,6 +536,7 @@ function loadMap(id) {
   currentMap = id;
   clearEffects();
   clearGrenades();
+  clearObjectives();
 }
 
 /* ============================== AUDIO ============================== */
@@ -610,6 +627,10 @@ const sfx = {
   },
   smoke: (dist) => playNoise(1.6, 4000, 0.35 / (1 + dist / 10)),
   siren: () => playTone(520, 0.85, 0.12, 'sawtooth', 0, 980),
+  swish: (vol = 0.35) => playNoise(0.14, 1700, vol),
+  stab: () => { playNoise(0.08, 400, 0.6); playTone(180, 0.12, 0.25, 'sine', 0, 70); },
+  capture: (good) => { playTone(good ? 660 : 440, 0.18, 0.2, 'triangle'); playTone(good ? 990 : 330, 0.3, 0.2, 'triangle', 0.15); },
+  infected: () => { playTone(140, 0.6, 0.3, 'sawtooth', 0, 60); playNoise(0.5, 300, 0.4); },
 };
 
 /* ============================= EFFECTS ============================= */
@@ -744,6 +765,19 @@ function addFlash(g, z, y) {
 }
 function buildGun(id) {
   const def = WEAPONS[id], g = new THREE.Group();
+  if (def.model === 'knife') {
+    const blade = new THREE.MeshStandardMaterial({ color: 0xb8bcc0, roughness: 0.25, metalness: 0.9 });
+    part(g, 0.03, 0.035, 0.12, 0, 0, 0.0, gunPoly);
+    part(g, 0.07, 0.015, 0.02, 0, 0.005, -0.07, gunMetal);
+    part(g, 0.008, 0.04, 0.2, 0, 0.008, -0.17, blade);
+    part(g, 0.006, 0.02, 0.05, 0, 0.0, -0.285, blade, 0.5);
+    part(g, 0.06, 0.06, 0.08, 0, -0.01, 0.01, gloveMat);
+    const arm = part(g, 0.075, 0.075, 0.36, 0.05, -0.06, 0.2, sleeveMat); arm.rotation.set(0.3, -0.25, 0);
+    g.rotation.set(0.15, 0.25, -0.35);
+    g.userData.sightY = 0; g.userData.adsZ = -0.4; g.userData.hip = new V3(0.2, -0.2, -0.38);
+    const dummy = new THREE.Sprite(new THREE.SpriteMaterial()); dummy.visible = false; g.add(dummy); g.userData.flash = dummy;
+    return g;
+  }
   if (def.model === 'pistol') {
     part(g, 0.034, 0.04, 0.19, 0, 0.03, -0.07, gunMetal);
     part(g, 0.03, 0.03, 0.17, 0, 0.0, -0.06, gunPoly);
@@ -805,12 +839,12 @@ const remotes = new Map();
 const playersGroup = new THREE.Group();
 scene.add(playersGroup);
 
-function makeNameTag(name) {
+function makeNameTag(name, color = '#ff6a55') {
   const c = document.createElement('canvas'); c.width = 256; c.height = 64;
   const g = c.getContext('2d');
   g.font = '700 36px Rajdhani, Arial, sans-serif'; g.textAlign = 'center';
   g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillText(name, 129, 44);
-  g.fillStyle = '#ff6a55'; g.fillText(name, 128, 42);
+  g.fillStyle = color; g.fillText(name, 128, 42);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false }));
   s.scale.set(1.3, 0.33, 1);
@@ -844,7 +878,7 @@ function makeSoldier(color) {
   for (const m of hitboxes) m.userData.part = 'body';
   legL.userData.part = legR.userData.part = 'leg';
   head.userData.part = helmet.userData.part = 'head';
-  return { group: g, hips, torso, legL, legR, arms, headG, hitboxes, flash };
+  return { group: g, hips, torso, legL, legR, arms, headG, hitboxes, flash, cloth, skin, gun };
 }
 function ensureRemote(info) {
   if (info.id === myId) return null;
@@ -854,15 +888,31 @@ function ensureRemote(info) {
     s.group.visible = false;
     playersGroup.add(s.group);
     for (const m of s.hitboxes) m.userData.pid = info.id;
-    rp = Object.assign(s, { id: info.id, name: info.name, target: new V3(), yaw: 0, tyaw: 0, pitch: 0, crouch: false, crouchT: 0, speed: 0, phase: 0, alive: false, deadT: -1, lastShot: -1e9, has: false, flashT: 0, tag: null });
+    rp = Object.assign(s, { id: info.id, name: info.name, look: '', target: new V3(), yaw: 0, tyaw: 0, pitch: 0, crouch: false, crouchT: 0, speed: 0, phase: 0, alive: false, deadT: -1, lastShot: -1e9, has: false, flashT: 0, tag: null });
     remotes.set(info.id, rp);
   }
-  if (!rp.tag || rp.name !== info.name) {
-    if (rp.tag) rp.group.remove(rp.tag);
-    rp.name = info.name;
-    rp.tag = makeNameTag(info.name); rp.tag.position.y = 2.2; rp.group.add(rp.tag);
-  }
+  rp.name = info.name;
+  applyLook(rp);
   return rp;
+}
+// Team colours, zombie skin and the name tag follow the player's current team.
+function applyLook(rp) {
+  const team = teamOf(rp.id), teams = match ? MODES[match.mode]?.teams : false;
+  const zombie = match?.mode === 'inf' && team === 1, ally = teams && !isEnemy(rp.id);
+  const key = `${rp.name}|${team}|${teams}|${ally}|${myTeam()}`;
+  if (rp.look === key) return;
+  rp.look = key;
+  rp.cloth.color.setHex(zombie ? 0x3d4a2c : teams && team >= 0 ? TEAM_CLOTH[team] : PLAYER_COLORS[rp.id % PLAYER_COLORS.length]);
+  rp.skin.color.setHex(zombie ? 0x7aa04a : 0xc09676);
+  rp.gun.visible = !zombie;
+  if (rp.tag) rp.group.remove(rp.tag);
+  const color = zombie ? ZOMBIE_GREEN : ally ? TEAM_COLORS[0] : '#ff6a55';
+  rp.tag = makeNameTag(rp.name, color);
+  rp.tag.position.y = 2.2;
+  rp.tag.userData.ally = ally;
+  // Teammates' names show through walls so you can find your squad.
+  if (ally) { rp.tag.material.depthTest = false; rp.tag.renderOrder = 5; }
+  rp.group.add(rp.tag);
 }
 function removeRemote(id) {
   const rp = remotes.get(id);
@@ -903,12 +953,12 @@ function updateRemotes(dt, now) {
     rp.arms.rotation.x = rp.pitch;
     rp.headG.rotation.x = rp.pitch * 0.6;
     if (rp.flashT > 0) { rp.flashT -= dt; rp.flash.visible = rp.flashT > 0; rp.flash.material.rotation = Math.random() * 6; }
-    rp.tag.visible = rp.group.position.distanceTo(camera.position) < 70;
+    rp.tag.visible = rp.tag.userData.ally || rp.group.position.distanceTo(camera.position) < 70;
   }
 }
 function aliveHitboxes() {
   const arr = [];
-  for (const rp of remotes.values()) if (rp.alive && rp.has && rp.group.visible) arr.push(...rp.hitboxes);
+  for (const rp of remotes.values()) if (rp.alive && rp.has && rp.group.visible && isEnemy(rp.id)) arr.push(...rp.hitboxes);
   return arr;
 }
 
@@ -957,7 +1007,7 @@ function explodeFrag(g) {
   if (g.owner === myId) {
     let hitSomeone = false;
     for (const rp of remotes.values()) {
-      if (!rp.alive || !rp.has) continue;
+      if (!rp.alive || !rp.has || !isEnemy(rp.id)) continue;
       const chest = rp.group.position.clone().setY(rp.group.position.y + 1.0);
       const d = src.distanceTo(chest);
       if (d >= FRAG.radius || !segmentClear(src, chest)) continue;
@@ -1060,6 +1110,79 @@ function clearGrenades() {
   grenades.length = smokes.length = booms.length = 0;
 }
 
+/* ============================ OBJECTIVES ============================ */
+
+// Flags (Domination) and the moving hill (Hardpoint), drawn in the world.
+let objGroup = null, objMarks = [];
+function clearObjectives() {
+  if (objGroup) { scene.remove(objGroup); objGroup = null; }
+  objMarks = [];
+}
+const relColor = (team) => (team === 2 ? '#ff9f1a' : team < 0 ? '#e8e8e8' : team === myTeam() ? TEAM_COLORS[0] : TEAM_COLORS[1]);
+function makeMark(label, r, flag) {
+  const g = new THREE.Group();
+  const col = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(r - 0.18, r, 56).rotateX(-Math.PI / 2), col);
+  ring.position.y = 0.04; g.add(ring);
+  const wallMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.09, depthWrite: false, side: THREE.DoubleSide });
+  g.add(new THREE.Mesh(new THREE.CylinderGeometry(r, r, 2.4, 56, 1, true).translate(0, 1.2, 0), wallMat));
+  let cloth = null;
+  if (flag) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 3.4, 8).translate(0, 1.7, 0), gunMetal);
+    pole.castShadow = true; g.add(pole);
+    cloth = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.55).translate(0.47, 3.05, 0), new THREE.MeshStandardMaterial({ color: 0xffffff, side: THREE.DoubleSide, roughness: 0.9 }));
+    g.add(cloth);
+  }
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, sizeAttenuation: false, transparent: true }));
+  sprite.scale.set(0.055, 0.055, 1); sprite.position.y = 4; sprite.renderOrder = 10; g.add(sprite);
+  objGroup.add(g);
+  return { g, label, col, wallMat, cloth, c, tex, key: '' };
+}
+function drawMark(m, fill, ringColor, prog, blink) {
+  const key = `${fill}|${ringColor}|${prog.toFixed(2)}|${blink}`;
+  if (m.key === key) return;
+  m.key = key;
+  const g = m.c.getContext('2d');
+  g.clearRect(0, 0, 128, 128);
+  g.fillStyle = 'rgba(0,0,0,0.55)'; g.beginPath(); g.arc(64, 64, 52, 0, 7); g.fill();
+  g.strokeStyle = fill; g.lineWidth = 8; g.beginPath(); g.arc(64, 64, 50, 0, 7); g.stroke();
+  if (prog > 0) { g.strokeStyle = ringColor; g.lineWidth = 12; g.beginPath(); g.arc(64, 64, 50, -Math.PI / 2, -Math.PI / 2 + prog * Math.PI * 2); g.stroke(); }
+  g.fillStyle = blink ? '#ff9f1a' : fill; g.font = `700 ${m.label.length > 1 ? 44 : 60}px Rajdhani, Arial, sans-serif`;
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(m.label, 64, 68);
+  m.tex.needsUpdate = true;
+  const hex = new THREE.Color(blink ? '#ff9f1a' : fill);
+  m.col.color.copy(hex); m.wallMat.color.copy(hex);
+  if (m.cloth) m.cloth.material.color.copy(hex);
+}
+function buildObjectives() {
+  clearObjectives();
+  if (!match || !(match.mode === 'dom' || match.mode === 'hp')) return;
+  objGroup = new THREE.Group();
+  scene.add(objGroup);
+  const z = MAPS[currentMap].zones;
+  if (match.mode === 'dom') objMarks = z.dom.map(([x, zz], i) => { const m = makeMark('ABC'[i], DOM_R, true); m.g.position.set(x, 0, zz); return m; });
+  else objMarks = [makeMark('HP', HP_R, false)];
+}
+// Zone currently being scored in Hardpoint.
+const hpZone = () => MAPS[currentMap].zones.hp[(match?.obj?.hp?.[0] ?? 0) % MAPS[currentMap].zones.hp.length];
+function updateObjectives(now) {
+  if (!match || !objGroup) return;
+  const blink = Math.floor(now / 300) % 2 === 0;
+  if (match.mode === 'dom') {
+    const flags = match.obj?.f || [];
+    objMarks.forEach((m, i) => {
+      const [owner, cap, prog, contested] = flags[i] || [-1, -1, 0, false];
+      drawMark(m, relColor(owner), relColor(cap), prog, contested && blink);
+    });
+  } else {
+    const m = objMarks[0], [x, z] = hpZone(), holder = match.obj?.hp?.[2] ?? -1;
+    m.g.position.set(x, 0, z);
+    drawMark(m, relColor(holder), '#fff', 0, holder === 2 && blink);
+  }
+}
+
 /* ============================== PLAYER ============================== */
 
 const P = {
@@ -1067,7 +1190,7 @@ const P = {
   hp: 100, alive: false, loadout: settings.loadout, pendingLoadout: null, weapons: [], cur: 0, adsT: 0, sprintT: 0,
   reloadUntil: 0, reloadStart: 0, swapUntil: 0, nextFire: 0, wantShot: false, bloom: 0, kick: 0, camKick: 0,
   bobPhase: 0, stepDist: 0, viewY: 0, sprinting: false, jumpReady: 0, deathAt: 0, killerId: null, swayX: 0, swayY: 0,
-  equip: { frag: 0, smoke: 0 }, throwReady: 0, throwUntil: 0, shake: 0,
+  equip: { frag: 0, smoke: 0 }, throwReady: 0, throwUntil: 0, shake: 0, meleeUntil: 0,
 };
 if (!LOADOUTS[P.loadout]) P.loadout = 'assault';
 const RADIUS = 0.38, GRAVITY = 22;
@@ -1106,25 +1229,47 @@ function physicsStep(e, h, dt) {
   e.pos.z = clamp(e.pos.z, -mapHalf + RADIUS, mapHalf - RADIUS);
 }
 
+const amZombie = () => match?.mode === 'inf' && myTeam() === 1;
+function giveKit() {
+  const ids = amZombie() ? ['knife'] : LOADOUTS[P.loadout].weapons;
+  P.weapons = ids.map((id) => ({ id, def: WEAPONS[id], mag: WEAPONS[id].mag, reserve: WEAPONS[id].reserve }));
+  P.cur = 0;
+  P.equip = amZombie() ? { frag: 0, smoke: 0 } : { frag: 2, smoke: 2 };
+}
 function spawnMe(sp) {
   P.loadout = P.pendingLoadout || P.loadout;
   P.pendingLoadout = null;
-  P.weapons = LOADOUTS[P.loadout].weapons.map((id) => ({ id, def: WEAPONS[id], mag: WEAPONS[id].mag, reserve: WEAPONS[id].reserve }));
-  P.cur = 0; P.hp = 100; P.alive = true;
+  giveKit();
+  P.hp = 100; P.alive = true;
   P.pos.copy(sp); P.vel.set(0, 0, 0); P.viewY = sp.y;
   P.yaw = Math.atan2(sp.x, sp.z); P.pitch = 0;
   P.crouch = false; P.crouchT = 0; P.slideT = 0; P.adsT = 0; P.sprintT = 0;
   P.reloadUntil = 0; P.swapUntil = performance.now() + 400; P.wantShot = false; P.bloom = 0;
-  P.equip = { frag: 2, smoke: 2 }; P.throwUntil = 0;
+  P.throwUntil = 0; P.meleeUntil = 0;
   showViewmodel();
   $('death').classList.add('hidden');
   sendState(true);
 }
-function bestSpawn() {
-  const enemies = [...remotes.values()].filter((r) => r.alive && r.has).map((r) => r.group.position);
-  if (!enemies.length) return spawns[Math.floor(Math.random() * spawns.length)];
-  const scored = spawns.map((s) => ({ s, d: Math.min(...enemies.map((e) => e.distanceToSquared(s))) })).sort((a, b) => b.d - a.d);
+// Away from enemies; with an anchor (teammates or the objective), the safe spot closest to it.
+function pickSpawn(enemies, anchor) {
+  if (!enemies.length && !anchor) return spawns[Math.floor(Math.random() * spawns.length)];
+  const scored = spawns.map((s) => ({ s, d: enemies.length ? Math.min(...enemies.map((e) => e.distanceToSquared(s))) : Infinity })).sort((a, b) => b.d - a.d);
+  if (anchor) {
+    const safe = scored.filter((x) => x.d > 18 * 18);
+    const pool = (safe.length >= 3 ? safe : scored.slice(0, 5)).sort((a, b) => a.s.distanceToSquared(anchor) - b.s.distanceToSquared(anchor));
+    return pool[Math.floor(Math.random() * Math.min(3, pool.length))].s;
+  }
   return scored[Math.floor(Math.random() * Math.min(3, scored.length))].s;
+}
+function bestSpawn() {
+  const alive = [...remotes.values()].filter((r) => r.alive && r.has);
+  const enemies = alive.filter((r) => isEnemy(r.id)).map((r) => r.group.position);
+  let anchor = null;
+  if (match && (match.mode === 'dom' || match.mode === 'hp')) {
+    const allies = alive.filter((r) => !isEnemy(r.id));
+    if (allies.length) anchor = allies.reduce((a, r) => a.add(r.group.position), new V3()).divideScalar(allies.length);
+  }
+  return pickSpawn(enemies, anchor);
 }
 function showViewmodel() {
   for (const [id, m] of Object.entries(vmModels)) m.visible = P.alive && curW() && id === curW().id;
@@ -1215,8 +1360,30 @@ const raycaster = new THREE.Raycaster();
 function muzzleWorld() {
   return new V3(0.16 * (1 - P.adsT), -0.12 * (1 - P.adsT) - 0.04, -0.9).applyMatrix4(camera.matrixWorld);
 }
+function melee(now) {
+  const d = curW().def;
+  P.nextFire = now + 60000 / d.rpm;
+  P.meleeUntil = now + 300;
+  camera.updateMatrixWorld();
+  playersGroup.updateMatrixWorld(true);
+  const origin = camera.getWorldPosition(new V3()), dir = camera.getWorldDirection(new V3());
+  raycaster.set(origin, dir);
+  raycaster.far = d.range;
+  const hits = raycaster.intersectObjects(mapMeshes.concat(aliveHitboxes()), false);
+  P.vel.x += dir.x * 5; P.vel.z += dir.z * 5;
+  sfx.swish();
+  const end = hits.length ? hits[0].point : origin.clone().addScaledVector(dir, d.range);
+  if (hits.length && hits[0].object.userData.pid) {
+    net.send({ t: 'hit', target: hits[0].object.userData.pid, dmg: d.dmg, head: false, w: 'knife' });
+    showHitmarker(false); sfx.stab();
+    emit(hits[0].point, dir.clone().negate(), 'blood', 16);
+  } else if (hits.length) emit(hits[0].point, dir.clone().negate(), hits[0].object.userData.surf, 6);
+  const r2 = (v) => Math.round(v * 100) / 100;
+  net.send({ t: 'shot', f: [r2(origin.x), r2(origin.y), r2(origin.z)], e: [r2(end.x), r2(end.y), r2(end.z)], w: 'knife' });
+}
 function fire(now) {
   const w = curW(), d = w.def;
+  if (d.melee) { melee(now); return; }
   if (w.mag <= 0) { sfx.empty(); P.wantShot = false; startReload(now); return; }
   w.mag--;
   P.nextFire = now + 60000 / d.rpm;
@@ -1275,12 +1442,12 @@ function fire(now) {
 
 function updateWeapon(dt, now, canMove) {
   const w = curW(), d = w.def;
-  const adsWanted = aiming() && canMove && !P.sprinting && now >= P.swapUntil;
+  const adsWanted = aiming() && canMove && !P.sprinting && now >= P.swapUntil && !d.melee;
   P.adsT = clamp(P.adsT + (adsWanted ? 1 : -1) * dt / d.adsTime, 0, 1);
   P.sprintT = damp(P.sprintT, P.sprinting ? 1 : 0, 10, dt);
   if (P.reloadUntil && now >= P.reloadUntil) finishReload();
   const triggering = d.auto ? mouseL : P.wantShot;
-  if (triggering && canMove && now >= P.nextFire && !P.reloadUntil && now >= P.swapUntil && now >= P.throwUntil && P.sprintT < 0.35) {
+  if (triggering && canMove && now >= P.nextFire && !P.reloadUntil && now >= P.swapUntil && now >= P.throwUntil && (d.melee || P.sprintT < 0.35)) {
     fire(now);
     if (!d.auto) P.wantShot = false;
   }
@@ -1313,6 +1480,10 @@ function updateViewmodel(dt, now) {
   }
   if (now < P.swapUntil) { const r = (P.swapUntil - now) / 450; pos.y -= 0.3 * r; rot.x -= 0.7 * r; }
   if (now < P.throwUntil) { const r = Math.sin(((P.throwUntil - now) / 450) * Math.PI); pos.y -= 0.22 * r; pos.x -= 0.05 * r; rot.x -= 0.5 * r; rot.z -= 0.3 * r; }
+  if (now < P.meleeUntil) {
+    const r = Math.sin((1 - (P.meleeUntil - now) / 300) * Math.PI);
+    pos.x -= 0.16 * r; pos.z -= 0.22 * r; pos.y += 0.04 * r; rot.y += 0.9 * r; rot.z += 0.5 * r;
+  }
   if (P.crouchT > 0.5 && P.slideT > 0) rot.z += 0.25;
   pos.z += P.kick * 0.25;
   rot.x += P.kick * 0.5;
@@ -1371,7 +1542,7 @@ function connect() {
 let match = null, mapReady = false, pendingGo = null, respawnTimer = null, lastStateSent = 0, nukeState = null;
 
 function callNuke() {
-  if (!match || nukeState || (pInfo(myId)?.kills ?? 0) < NUKE_KILLS) return;
+  if (!match || match.mode === 'inf' || nukeState || (pInfo(myId)?.kills ?? 0) < NUKE_KILLS) return;
   net.send({ t: 'nuke' });
 }
 function detonateNuke() {
@@ -1385,6 +1556,16 @@ function detonateNuke() {
   P.shake = 2.5;
 }
 const pInfo = (id) => room?.players.find((p) => p.id === id);
+const teamOf = (id) => pInfo(id)?.team ?? -1;
+const myTeam = () => teamOf(myId);
+const isEnemy = (id) => id !== myId && !(match && MODES[match.mode]?.teams && teamOf(id) === myTeam());
+const teamName = (t) => TEAM_NAMES[match?.mode]?.[t] ?? '';
+function refreshLooks() { for (const rp of remotes.values()) applyLook(rp); }
+function setTeam(id, team) {
+  const info = pInfo(id);
+  if (info) info.team = team;
+  refreshLooks();
+}
 const pName = (id) => (id === myId ? (pInfo(id)?.name || 'You') : (pInfo(id)?.name || remotes.get(id)?.name || '???'));
 
 function onMsg(m) {
@@ -1433,8 +1614,10 @@ function onMsg(m) {
     case 'shot': {
       const rp = remotes.get(m.id);
       if (!rp || !Array.isArray(m.f) || !Array.isArray(m.e)) break;
-      rp.lastShot = now; rp.flashT = 0.05;
+      rp.lastShot = now;
       const from = new V3().fromArray(m.f), to = new V3().fromArray(m.e);
+      if (m.w === 'knife') { sfx.swish(0.35 / (1 + from.distanceTo(camera.position) / 6)); break; }
+      rp.flashT = 0.05;
       tracer(from, to);
       const def = WEAPONS[m.w] || WEAPONS.m4;
       const rel = from.clone().sub(camera.position), dist = rel.length();
@@ -1452,7 +1635,17 @@ function onMsg(m) {
       const k = pInfo(m.killer), v = pInfo(m.victim);
       if (k) k.kills = m.kk;
       if (v) { v.deaths = m.vd; v.alive = false; }
+      const turned = match?.mode === 'inf' && m.vt === 1 && v && v.team === 0;
+      if (m.vt != null) setTeam(m.victim, m.vt);
       addKillfeed(m.killer, m.victim, m.w, m.head);
+      if (turned) {
+        addFeedText(`${pName(m.victim)} has been INFECTED`);
+        const left = room.players.filter((p) => p.team === 0);
+        if (left.length === 1) {
+          if (left[0].id === myId) notify('YOU ARE THE LAST SURVIVOR', 'LAST ONE STANDING');
+          else addFeedText(`${pName(left[0].id)} is the last survivor`);
+        }
+      }
       if (m.victim === myId) onMyDeath(m.killer, m.head);
       else { const rp = remotes.get(m.victim); if (rp) setRemoteAlive(rp, false); }
       if (m.killer === myId && m.victim !== myId) { showHitmarker(true); sfx.kill(); notify(`${m.head ? 'HEADSHOT  ' : ''}ELIMINATED ${pName(m.victim)}`, m.head ? '+150' : '+100'); }
@@ -1462,6 +1655,7 @@ function onMsg(m) {
     case 'spawned': {
       const info = pInfo(m.id);
       if (info) { info.alive = true; info.hp = 100; }
+      if (m.team != null) setTeam(m.id, m.team);
       if (m.id === myId) { if (mapReady && match) spawnMe(bestSpawn()); }
       else { const rp = remotes.get(m.id); if (rp) setRemoteAlive(rp, true); }
       break;
@@ -1477,6 +1671,29 @@ function onMsg(m) {
         if (rp) rp.lastShot = now;
       }
       break;
+    case 'team': {
+      const wasMe = m.id === myId;
+      setTeam(m.id, m.team);
+      if (match?.mode === 'inf' && m.team === 1) {
+        if (wasMe) { notify('YOU ARE THE INFECTED', 'KNIFE THEM ALL'); sfx.infected(); if (P.alive) { giveKit(); showViewmodel(); } }
+        else addFeedText(`${pName(m.id)} is now INFECTED`);
+      }
+      break;
+    }
+    case 'obj':
+      if (match) match.obj = m;
+      break;
+    case 'cap':
+      if (match) {
+        const mine = m.team === myTeam();
+        addFeedText(`${teamName(m.team)} captured ${'ABC'[m.i]}`);
+        sfx.capture(mine);
+        notify(`${mine ? 'CAPTURED' : 'LOST'} ${'ABC'[m.i]}`, mine ? '+FLAG' : '');
+      }
+      break;
+    case 'hpmove':
+      if (match) { if (match.obj?.hp) match.obj.hp[0] = m.i; addFeedText('The HARDPOINT has moved'); sfx.capture(true); }
+      break;
     case 'nuke':
       nukeState = { by: m.by, at: m.at, lastBeep: -1, boomed: false };
       addFeedText(`☢ ${pName(m.by)} called in a TACTICAL NUKE`);
@@ -1486,8 +1703,8 @@ function onMsg(m) {
         // Let everyone see the blast before the results appear.
         detonateNuke();
         clearTimeout(respawnTimer);
-        setTimeout(() => showEnd(m.players, m.nukeBy), 3200);
-      } else showEnd(m.players, null);
+        setTimeout(() => showEnd(m.players, m.nukeBy, m), 3200);
+      } else showEnd(m.players, null, m);
       break;
   }
 }
@@ -1535,54 +1752,82 @@ function segmentClear(a, b) {
 
 let offline = null;
 
+const MODE_LIMITS = { ffa: 30, dom: 200, hp: 150, inf: 0 };
+
 class LocalMatch {
   constructor(cfg) {
     this.cfg = cfg;
+    this.mode = cfg.mode || 'ffa';
+    this.teams = MODES[this.mode].teams;
     this.diff = BOT_DIFF[cfg.diff] || BOT_DIFF.normal;
     this.state = 'loading';
-    this.startAt = 0; this.endAt = 0; this.scoreLimit = 30;
+    this.startAt = 0; this.endAt = 0; this.scoreLimit = MODE_LIMITS[this.mode];
     this.nukeAt = 0; this.nukeBy = null;
-    this.me = { id: 1, name: cfg.name, loadout: cfg.loadout, kills: 0, deaths: 0, hp: 100, alive: false, diedAt: 0, lastHit: 0, lastShot: -1e9, isMe: true };
+    this.scores = [0, 0];
+    this.flags = MAPS[cfg.map].zones.dom.map(() => ({ owner: -1, cap: -1, prog: 0, contested: false }));
+    this.hpIdx = 0; this.hpUntil = 0; this.hpHolder = -1; this.objT = 0;
+    this.me = { id: 1, name: cfg.name, loadout: cfg.loadout, team: this.mode === 'inf' ? 0 : this.teams ? 0 : -1, kills: 0, deaths: 0, hp: 100, alive: false, diedAt: 0, lastHit: 0, lastShot: -1e9, isMe: true };
     const names = [...BOT_NAMES].sort(() => Math.random() - 0.5), los = Object.keys(LOADOUTS);
     this.bots = [];
     for (let i = 0; i < cfg.bots; i++) {
       const loadout = los[Math.floor(Math.random() * los.length)];
-      const wid = LOADOUTS[loadout].weapons[loadout === 'marksman' ? Math.floor(Math.random() * 2) : 0];
-      this.bots.push({ id: i + 2, name: names[i % names.length], loadout, wid, w: WEAPONS[wid], kills: 0, deaths: 0, hp: 100, alive: false, diedAt: 0, lastHit: 0, lastShot: -1e9,
-        pos: new V3(), vel: new V3(), grounded: true, yaw: 0, pitch: 0, mag: WEAPONS[wid].mag, ai: null, sentAt: 0 });
+      const gun = LOADOUTS[loadout].weapons[loadout === 'marksman' ? Math.floor(Math.random() * 2) : 0];
+      // Alternate teams so the player's side and the bots' side stay even.
+      const team = this.mode === 'inf' ? 0 : this.teams ? (i % 2 === 0 ? 1 : 0) : -1;
+      this.bots.push({ id: i + 2, name: names[i % names.length], loadout, gun, wid: gun, w: WEAPONS[gun], team, kills: 0, deaths: 0, hp: 100, alive: false, diedAt: 0, lastHit: 0, lastShot: -1e9,
+        pos: new V3(), vel: new V3(), grounded: true, yaw: 0, pitch: 0, mag: WEAPONS[gun].mag, ai: null, sentAt: 0 });
     }
     this.all = [this.me, ...this.bots];
+    if (this.mode === 'inf') this.all[Math.floor(Math.random() * this.all.length)].team = 1;
   }
   send(m) { queueMicrotask(() => onMsg(m)); }
-  pub(p) { return { id: p.id, name: p.name, loadout: p.loadout, kills: p.kills, deaths: p.deaths, hp: Math.round(p.hp), alive: p.alive }; }
+  pub(p) { return { id: p.id, name: p.name, loadout: p.loadout, team: p.team, kills: p.kills, deaths: p.deaths, hp: Math.round(p.hp), alive: p.alive }; }
+  obj() {
+    const s = [Math.floor(this.scores[0]), Math.floor(this.scores[1])];
+    if (this.mode === 'dom') return { s, f: this.flags.map((f) => [f.owner, f.cap, Math.round(f.prog * 100) / 100, f.contested]) };
+    if (this.mode === 'hp') return { s, hp: [this.hpIdx, this.hpUntil, this.hpHolder] };
+    return { s };
+  }
   begin() {
     myId = 1;
-    this.send({ t: 'lobby', code: 'OFFLINE', hostId: 1, map: this.cfg.map, state: 'loading', players: this.all.map((p) => this.pub(p)) });
+    this.send({ t: 'lobby', code: 'OFFLINE', hostId: 1, map: this.cfg.map, mode: this.mode, state: 'loading', players: this.all.map((p) => this.pub(p)) });
     this.send({ t: 'load', map: this.cfg.map });
   }
   handle(m) {
     const now = serverNow();
     switch (m.t) {
-      case 'loaded':
+      case 'loaded': {
         if (this.state !== 'loading') return;
         this.state = 'playing';
         this.startAt = now + 4000;
-        this.endAt = this.startAt + 10 * 60 * 1000;
+        this.endAt = this.startAt + (this.mode === 'inf' ? 5 : 10) * 60 * 1000;
+        this.hpUntil = this.startAt + HP_ROTATE_MS;
         for (const p of this.all) { p.alive = true; p.hp = 100; }
-        this.bots.forEach((b, i) => this.spawnBot(b, spawns[(i + 1) % spawns.length]));
-        this.send({ t: 'go', startAt: this.startAt, endAt: this.endAt, scoreLimit: this.scoreLimit, nukeAt: 0, players: this.all.map((p) => this.pub(p)) });
+        const used = new Map();
+        for (const b of this.bots) {
+          const side = this.sideSpawns(b.team), n = used.get(b.team) || 0;
+          used.set(b.team, n + 1);
+          this.spawnBot(b, side[(n + 1) % side.length]);
+        }
+        this.send({ t: 'go', mode: this.mode, startAt: this.startAt, endAt: this.endAt, scoreLimit: this.scoreLimit, obj: this.obj(), nukeAt: 0, players: this.all.map((p) => this.pub(p)) });
         break;
+      }
       case 'shot': this.me.lastShot = now; break;
       case 'hit': { const t = this.bots.find((b) => b.id === m.target); if (t) this.applyHit(this.me, t, m.dmg, m.head, m.w); break; }
       case 'respawn':
-        if (this.state === 'playing' && !this.me.alive && now - this.me.diedAt >= 2600) { this.me.alive = true; this.me.hp = 100; this.send({ t: 'spawned', id: 1 }); }
+        if (this.state === 'playing' && !this.me.alive && now - this.me.diedAt >= 2600) { this.me.alive = true; this.me.hp = 100; this.send({ t: 'spawned', id: 1, team: this.me.team }); }
         break;
       case 'setLoadout': if (LOADOUTS[m.loadout]) this.me.loadout = m.loadout; break;
-      case 'nuke': if (this.me.kills >= NUKE_KILLS) this.callNuke(1); break;
+      case 'nuke': if (this.mode !== 'inf' && this.me.kills >= NUKE_KILLS) this.callNuke(1); break;
     }
   }
+  // Team sides: team 0 starts on the west of the map, team 1 on the east.
+  sideSpawns(team) {
+    if (!this.teams || this.mode === 'inf' || team < 0) return spawns;
+    return [...spawns].sort((a, b) => (team === 0 ? a.x - b.x : b.x - a.x)).slice(0, 8);
+  }
   callNuke(id) {
-    if (this.state !== 'playing' || this.nukeAt) return;
+    if (this.state !== 'playing' || this.nukeAt || this.mode === 'inf') return;
     this.nukeAt = serverNow() + 10000;
     this.nukeBy = id;
     this.send({ t: 'nuke', by: id, at: this.nukeAt });
@@ -1609,60 +1854,149 @@ class LocalMatch {
   applyHit(att, t, dmg, head, w) {
     const now = serverNow();
     if (this.state !== 'playing' || now < this.startAt || !att.alive || !t.alive || att === t) return;
+    if (this.teams && att.team === t.team) return;
     t.hp -= clamp(Number(dmg) || 0, 0, 250);
     t.lastHit = now;
     if (t.ai) { t.ai.alertId = att.id; t.ai.alertUntil = now + 3000; }
     if (t.hp <= 0) {
       t.hp = 0; t.alive = false; t.deaths++; t.diedAt = now; att.kills++;
-      this.send({ t: 'kill', killer: att.id, victim: t.id, head: !!head, w, kk: att.kills, vd: t.deaths });
+      if (this.mode === 'inf' && t.team === 0) t.team = 1;
+      this.send({ t: 'kill', killer: att.id, victim: t.id, head: !!head, w, kk: att.kills, vd: t.deaths, vt: t.team });
       if (!att.isMe && att.kills >= NUKE_KILLS) this.callNuke(att.id);
-      if (att.kills >= this.scoreLimit) this.end();
+      if (this.mode === 'ffa' && att.kills >= this.scoreLimit) this.end();
+      if (this.mode === 'inf' && !this.all.some((p) => p.team === 0)) this.end();
     } else this.send({ t: 'damage', target: t.id, from: att.id, hp: Math.round(t.hp) });
+  }
+  winTeam() {
+    const nb = this.nukeAt ? this.all.find((p) => p.id === this.nukeBy) : null;
+    if (nb) return nb.team;
+    if (this.mode === 'inf') return this.all.some((p) => p.team === 0) ? 0 : 1;
+    if (this.mode === 'dom' || this.mode === 'hp') {
+      const [a, b] = this.scores.map(Math.floor);
+      return a === b ? -1 : a > b ? 0 : 1;
+    }
+    return -1;
   }
   end() {
     if (this.state === 'ended') return;
     this.state = 'ended';
     const nb = this.nukeAt ? this.nukeBy : null;
     const standings = this.all.map((p) => this.pub(p)).sort((a, b) => (b.id === nb) - (a.id === nb) || b.kills - a.kills || a.deaths - b.deaths);
-    this.send({ t: 'end', players: standings, nukeBy: nb });
+    this.send({ t: 'end', players: standings, nukeBy: nb, mode: this.mode, winTeam: this.winTeam(), scores: this.scores.map(Math.floor) });
   }
-  // Everyone alive except `self`, with live position references.
+  // Enemies of `self` that are alive, with live position references.
   targets(self) {
     const list = [];
-    if (self !== this.me && this.me.alive && P.alive) list.push({ id: 1, ent: this.me, pos: P.pos });
-    for (const b of this.bots) if (b !== self && b.alive) list.push({ id: b.id, ent: b, pos: b.pos });
+    const foe = (p) => p !== self && p.alive && (!this.teams || p.team !== self.team);
+    if (foe(this.me) && P.alive) list.push({ id: 1, ent: this.me, pos: P.pos });
+    for (const b of this.bots) if (foe(b)) list.push({ id: b.id, ent: b, pos: b.pos });
     return list;
   }
+  // Same capture and scoring rules as update_objectives() in server.py.
+  objStep(now) {
+    const people = [];
+    if (this.me.alive && P.alive) people.push({ team: this.me.team, pos: P.pos });
+    for (const b of this.bots) if (b.alive) people.push({ team: b.team, pos: b.pos });
+    const counts = (x, z, r) => {
+      const c = [0, 0];
+      for (const p of people) if (p.team >= 0 && p.pos.y < 6 && Math.hypot(p.pos.x - x, p.pos.z - z) < r) c[p.team]++;
+      return c;
+    };
+    const zones = MAPS[this.cfg.map].zones;
+    if (this.mode === 'dom') {
+      zones.dom.forEach(([x, z], i) => {
+        const f = this.flags[i], c = counts(x, z, DOM_R);
+        f.contested = c[0] > 0 && c[1] > 0;
+        if (f.contested) return;
+        const team = c[0] ? 0 : c[1] ? 1 : -1;
+        if (team < 0 || team === f.owner) { f.prog = Math.max(0, f.prog - 0.25 / 5); if (!f.prog) f.cap = -1; return; }
+        if (f.cap !== team) { f.cap = team; f.prog = 0; }
+        f.prog += 0.25 / (5 * (f.owner >= 0 ? 1.6 : 1)) * Math.min(3, c[team]);
+        if (f.prog >= 1) { f.owner = team; f.cap = -1; f.prog = 0; this.send({ t: 'cap', i, team }); }
+      });
+      for (const f of this.flags) if (f.owner >= 0) this.scores[f.owner] += 0.25;
+    } else {
+      if (now >= this.hpUntil) {
+        this.hpIdx = (this.hpIdx + 1) % zones.hp.length;
+        this.hpUntil += HP_ROTATE_MS;
+        this.send({ t: 'hpmove', i: this.hpIdx });
+      }
+      const [x, z] = zones.hp[this.hpIdx], c = counts(x, z, HP_R);
+      this.hpHolder = c[0] && c[1] ? 2 : c[0] ? 0 : c[1] ? 1 : -1;
+      if (this.hpHolder === 0 || this.hpHolder === 1) this.scores[this.hpHolder] += 0.25;
+    }
+    this.send({ t: 'obj', ...this.obj() });
+    if (Math.max(...this.scores) >= this.scoreLimit) this.end();
+  }
   spawnBot(b, sp) {
+    const zombie = this.mode === 'inf' && b.team === 1;
+    b.wid = zombie ? 'knife' : b.gun; b.w = WEAPONS[b.wid];
     b.pos.copy(sp); b.vel.set(0, 0, 0); b.grounded = true;
-    b.yaw = Math.atan2(sp.x, sp.z); b.pitch = 0; b.mag = b.w.mag; b.sentAt = 0; b.nades = 1;
-    b.ai = { wp: null, target: null, visible: false, reactAt: 0, lastSeen: -1e9, lastSeenPos: new V3(), nextFire: 0, reloadUntil: 0,
-      burst: 0, burstLen: randInt(this.diff.burst), nadeReady: 0, strafe: 0, strafeT: 0, thinkT: 0, stuckT: 0, lastPos: sp.clone(), alertId: null, alertUntil: 0 };
+    b.yaw = Math.atan2(sp.x, sp.z); b.pitch = 0; b.mag = b.w.mag; b.sentAt = 0; b.nades = zombie ? 0 : 1;
+    b.ai = { wp: null, target: null, visible: false, reactAt: 0, lastSeen: -1e9, lastSeenPos: new V3(), nextFire: 0, reloadUntil: 0, repath: 0,
+      burst: 0, burstLen: randInt(this.diff.burst), nadeReady: 0, strafe: 0, strafeT: 0, thinkT: 0, stuckT: 0, lastPos: sp.clone(), alertId: null, alertUntil: 0, goalIdx: -1 };
   }
   farSpawn(self) {
-    const others = this.targets(self).map((t) => t.pos);
-    if (!others.length) return spawns[Math.floor(Math.random() * spawns.length)];
-    const scored = spawns.map((s) => ({ s, d: Math.min(...others.map((o) => o.distanceToSquared(s))) })).sort((a, b) => b.d - a.d);
-    return scored[Math.floor(Math.random() * Math.min(3, scored.length))].s;
+    const anchor = this.mode === 'dom' || this.mode === 'hp' ? this.objective(self)?.pos : null;
+    return pickSpawn(this.targets(self).map((t) => t.pos), anchor);
   }
-  pickWaypoint(b, goal) {
+  // Where a bot heads when it has nobody to fight: a flag, the hill, or the nearest survivor.
+  objective(b) {
+    const zones = MAPS[this.cfg.map].zones;
+    if (this.mode === 'dom') {
+      const ai = b.ai;
+      const want = this.flags.map((f, i) => ({ i, f, d: Math.hypot(zones.dom[i][0] - b.pos.x, zones.dom[i][1] - b.pos.z) }))
+        .filter(({ f }) => f.owner !== b.team || f.contested || (f.cap >= 0 && f.cap !== b.team));
+      if (ai.goalIdx < 0 || !want.some((w) => w.i === ai.goalIdx)) {
+        if (want.length) {
+          // Mostly go for the closest flag, sometimes another, so bots spread out.
+          want.sort((a, c) => a.d - c.d);
+          ai.goalIdx = want[Math.random() < 0.65 ? 0 : Math.floor(Math.random() * want.length)].i;
+        } else ai.goalIdx = Math.floor(Math.random() * zones.dom.length);
+      }
+      const [x, z] = zones.dom[ai.goalIdx];
+      return { pos: new V3(x, 0, z), r: DOM_R };
+    }
+    if (this.mode === 'hp') { const [x, z] = zones.hp[this.hpIdx]; return { pos: new V3(x, 0, z), r: HP_R }; }
+    if (this.mode === 'inf' && b.team === 1) {
+      let best = null, bd = Infinity;
+      for (const t of this.targets(b)) { const d = t.pos.distanceTo(b.pos); if (d < bd) { bd = d; best = t; } }
+      return best ? { pos: best.pos.clone(), r: 0, chase: true } : null;
+    }
+    return null;
+  }
+  pickWaypoint(b, goal, r = 0) {
     const knee = new V3(b.pos.x, b.pos.y + 0.6, b.pos.z), chest = new V3(b.pos.x, b.pos.y + 1.4, b.pos.z);
+    if (goal && r > 0 && Math.hypot(goal.x - b.pos.x, goal.z - b.pos.z) < r - 0.8) {
+      // Inside the zone: shuffle around in it rather than standing still.
+      for (let i = 0; i < 10; i++) {
+        const a = Math.random() * Math.PI * 2, rr = Math.random() * (r - 1);
+        const p = new V3(goal.x + Math.cos(a) * rr, 0, goal.z + Math.sin(a) * rr);
+        if (clearArea(p.x, p.z, 0.5) && segmentClear(knee, new V3(p.x, 0.6, p.z))) return p;
+      }
+      return b.pos.clone();
+    }
     if (goal && segmentClear(knee, new V3(goal.x, goal.y + 0.6, goal.z))) return goal.clone();
+    let best = null, bd = Infinity;
     for (let i = 0; i < 30; i++) {
       const p = navPts[Math.floor(Math.random() * navPts.length)], dist = p.distanceTo(b.pos);
-      if (dist < 6 || dist > 32) continue;
-      if (segmentClear(knee, new V3(p.x, 0.6, p.z)) && segmentClear(chest, new V3(p.x, 1.4, p.z))) return p.clone();
+      if (dist < 4 || dist > 32) continue;
+      if (!segmentClear(knee, new V3(p.x, 0.6, p.z)) || !segmentClear(chest, new V3(p.x, 1.4, p.z))) continue;
+      if (!goal) return p.clone();
+      // Toward a goal: the visible point that gets closest to it.
+      const score = p.distanceTo(goal) + dist * 0.15;
+      if (score < bd) { bd = score; best = p; }
     }
-    return navPts[Math.floor(Math.random() * navPts.length)].clone();
+    return (best || navPts[Math.floor(Math.random() * navPts.length)]).clone();
   }
   tick(dt, paused) {
     if (this.state !== 'playing') return;
     if (paused) {
       // Offline matches freeze while the pause menu is open.
       const ms = dt * 1000;
-      this.startAt += ms; this.endAt += ms;
+      this.startAt += ms; this.endAt += ms; this.hpUntil += ms;
       for (const b of this.bots) b.diedAt += ms;
-      if (match) { match.startAt = this.startAt; match.endAt = this.endAt; }
+      if (match) { match.startAt = this.startAt; match.endAt = this.endAt; if (match.obj?.hp) match.obj.hp[1] = this.hpUntil; }
       if (this.nukeAt) { this.nukeAt += ms; if (nukeState) nukeState.at = this.nukeAt; }
       this.pushStates();
       return;
@@ -1670,6 +2004,11 @@ class LocalMatch {
     const now = serverNow();
     if (now >= this.endAt || (this.nukeAt && now >= this.nukeAt)) { this.end(); return; }
     if (now >= this.startAt) {
+      if (this.mode === 'dom' || this.mode === 'hp') {
+        this.objT += dt;
+        while (this.objT >= 0.25 && this.state === 'playing') { this.objT -= 0.25; this.objStep(now); }
+        if (this.state !== 'playing') return;
+      }
       for (const p of this.all) {
         if (p.alive && p.hp < 100 && now - p.lastHit > 4000) {
           p.hp = Math.min(100, p.hp + 48 * dt);
@@ -1678,7 +2017,7 @@ class LocalMatch {
       }
       for (const b of this.bots) {
         if (!b.alive) {
-          if (now - b.diedAt >= 3000) { b.alive = true; b.hp = 100; this.spawnBot(b, this.farSpawn(b)); this.send({ t: 'spawned', id: b.id }); }
+          if (now - b.diedAt >= 3000) { b.alive = true; b.hp = 100; this.spawnBot(b, this.farSpawn(b)); this.send({ t: 'spawned', id: b.id, team: b.team }); }
           continue;
         }
         this.updateBot(b, dt, now);
@@ -1714,7 +2053,7 @@ class LocalMatch {
         if (dist < bd) { bd = dist; best = t; }
       }
       if (best) {
-        if (!ai.target || ai.target.id !== best.id || now - ai.lastSeen > 1200) ai.reactAt = now + d.react * rand(0.7, 1.3);
+        if (!ai.target || ai.target.id !== best.id || now - ai.lastSeen > 1200) ai.reactAt = now + d.react * rand(0.7, 1.3) * (w.melee ? 0.5 : 1);
         ai.target = best; ai.lastSeen = now; ai.lastSeenPos.copy(best.pos); ai.visible = true;
         if (b.nades > 0 && now >= ai.nadeReady && now >= ai.reactAt && bd > 7 && bd < 24 && Math.random() < 0.06) this.botThrow(b, best, now);
       } else {
@@ -1725,9 +2064,14 @@ class LocalMatch {
     if (ai.target && !ai.target.ent.alive) { ai.target = null; ai.visible = false; ai.wp = null; }
     const T = ai.target;
 
-    // --- Movement: strafe and hold range in a fight, otherwise roam / hunt ---
+    // --- Movement: strafe and hold range in a fight, otherwise play the objective / roam ---
     let wx = 0, wz = 0, sprint = false;
-    if (T && ai.visible) {
+    if (T && ai.visible && w.melee) {
+      // Zombies run straight at whoever they can see.
+      const dx = T.pos.x - b.pos.x, dz = T.pos.z - b.pos.z, dist = Math.hypot(dx, dz) || 1;
+      if (dist > 1.2) { wx = dx / dist; wz = dz / dist; }
+      sprint = true; ai.wp = null;
+    } else if (T && ai.visible) {
       const dx = T.pos.x - b.pos.x, dz = T.pos.z - b.pos.z, dist = Math.hypot(dx, dz) || 1, fx = dx / dist, fz = dz / dist;
       ai.strafeT -= dt;
       if (ai.strafeT <= 0) {
@@ -1741,10 +2085,14 @@ class LocalMatch {
       wz = fz * adv + fx * ai.strafe;
       ai.wp = null;
     } else {
-      const goal = T ? ai.lastSeenPos : null;
-      if (!ai.wp || b.pos.distanceTo(ai.wp) < 1.5) ai.wp = this.pickWaypoint(b, goal);
-      const dx = ai.wp.x - b.pos.x, dz = ai.wp.z - b.pos.z, dl = Math.hypot(dx, dz) || 1;
-      wx = dx / dl; wz = dz / dl; sprint = !goal;
+      const obj = T ? null : this.objective(b);
+      const goal = T ? ai.lastSeenPos : obj?.pos || null;
+      ai.repath -= dt;
+      if (!ai.wp || b.pos.distanceTo(ai.wp) < 1.5 || (obj?.chase && ai.repath <= 0)) { ai.wp = this.pickWaypoint(b, goal, obj?.r || 0); ai.repath = 1; }
+      const dx = ai.wp.x - b.pos.x, dz = ai.wp.z - b.pos.z, dl = Math.hypot(dx, dz);
+      if (dl > 0.3) { wx = dx / dl; wz = dz / dl; }
+      const inZone = obj && obj.r > 0 && Math.hypot(obj.pos.x - b.pos.x, obj.pos.z - b.pos.z) < obj.r;
+      sprint = !T && !inZone;
     }
     ai.stuckT += dt;
     if (ai.stuckT > 1.2) {
@@ -1756,7 +2104,7 @@ class LocalMatch {
     }
     const wl = Math.hypot(wx, wz);
     if (wl > 1) { wx /= wl; wz /= wl; }
-    const speed = 5.4 * w.move * (sprint ? 1.35 : 1) * (T && ai.visible ? 0.8 : 1);
+    const speed = 5.4 * w.move * (sprint ? 1.35 : 1) * (T && ai.visible && !w.melee ? 0.8 : 1);
     const accel = b.grounded ? 10 : 2;
     b.vel.x = damp(b.vel.x, wx * speed, accel, dt);
     b.vel.z = damp(b.vel.z, wz * speed, accel, dt);
@@ -1769,15 +2117,24 @@ class LocalMatch {
       wantYaw = Math.atan2(-dx, -dz); wantPitch = Math.atan2(dy, Math.hypot(dx, dz));
     } else if (Math.hypot(b.vel.x, b.vel.z) > 0.5) wantYaw = Math.atan2(-b.vel.x, -b.vel.z);
     const dyaw = Math.atan2(Math.sin(wantYaw - b.yaw), Math.cos(wantYaw - b.yaw));
-    const maxTurn = (T ? d.turn : 6) * dt;
+    const maxTurn = (T ? d.turn * (w.melee ? 1.6 : 1) : 6) * dt;
     b.yaw += clamp(dyaw, -maxTurn, maxTurn);
     b.pitch = damp(b.pitch, wantPitch, 8, dt);
 
-    // --- Fire ---
-    if (T && ai.visible && now >= ai.reactAt && Math.abs(dyaw) < 0.12 && now >= ai.nextFire && now >= ai.reloadUntil) {
+    // --- Attack ---
+    if (w.melee) {
+      if (T && ai.visible && now >= ai.reactAt && now >= ai.nextFire && Math.hypot(T.pos.x - b.pos.x, T.pos.z - b.pos.z) < 1.9 && Math.abs(T.pos.y - b.pos.y) < 1.5) this.botStab(b, T, now);
+    } else if (T && ai.visible && now >= ai.reactAt && Math.abs(dyaw) < 0.12 && now >= ai.nextFire && now >= ai.reloadUntil) {
       if (b.mag <= 0) { ai.reloadUntil = now + w.reload * 1000; b.mag = w.mag; }
       else this.botFire(b, T, now);
     }
+  }
+  botStab(b, T, now) {
+    b.ai.nextFire = now + 650;
+    b.lastShot = now;
+    const e = [T.pos.x, T.pos.y + 1.2, T.pos.z];
+    this.send({ t: 'shot', id: b.id, f: [b.pos.x, b.pos.y + 1.4, b.pos.z], e, w: 'knife' });
+    if (Math.random() < 0.55 + this.diff.acc * 0.8) this.applyHit(b, T.ent, WEAPONS.knife.dmg, false, 'knife');
   }
   botFire(b, T, now) {
     const ai = b.ai, w = b.w, d = this.diff;
@@ -1867,6 +2224,8 @@ function renderLobby(prev) {
     maps.appendChild(el);
   }
   $('mapHint').textContent = isHost ? '(you pick)' : '(host picks)';
+  modeCards($('modes'), room.mode || 'ffa', isHost, (key) => net.send({ t: 'setMode', mode: key }));
+  $('modeHint').textContent = isHost ? '(you pick)' : '(host picks)';
   refreshLoadoutViews();
   $('btnStart').classList.toggle('hidden', !isHost);
   $('waitHost').classList.toggle('hidden', isHost);
@@ -1911,7 +2270,7 @@ function startLoading(mapId) {
 
 function applyGo(m) {
   if (ui === 'hud' && match && match.startAt === m.startAt) return;
-  match = { startAt: m.startAt, endAt: m.endAt, scoreLimit: m.scoreLimit };
+  match = { mode: m.mode || 'ffa', startAt: m.startAt, endAt: m.endAt, scoreLimit: m.scoreLimit, obj: m.obj || { s: [0, 0] } };
   nukeState = m.nukeAt ? { by: m.nukeBy, at: m.nukeAt, lastBeep: -1, boomed: false } : null;
   $('nukeflash').classList.remove('boom');
   if (room) room.players = m.players;
@@ -1919,6 +2278,8 @@ function applyGo(m) {
     const rp = ensureRemote(p);
     if (rp) setRemoteAlive(rp, p.alive);
   }
+  refreshLooks();
+  buildObjectives();
   $('killfeed').innerHTML = '';
   showScreen('hud');
   $('pause').classList.remove('hidden');
@@ -1926,10 +2287,24 @@ function applyGo(m) {
   const me = m.players.find((p) => p.id === myId);
   if (me && me.alive) {
     const late = serverNow() > m.startAt;
-    const order = [...m.players].sort((a, b) => a.id - b.id).findIndex((p) => p.id === myId);
-    spawnMe(late ? bestSpawn() : spawns[order % spawns.length]);
+    spawnMe(late ? bestSpawn() : startSpawn(m.players));
   }
   refreshLoadoutViews();
+  const mode = MODES[match.mode];
+  if (match.mode === 'inf') {
+    const z = m.players.find((p) => p.team === 1);
+    if (z && z.id === myId) { notify('YOU ARE THE INFECTED', 'KNIFE THEM ALL'); }
+    else if (z) notify(`${z.name} IS INFECTED — SURVIVE`, 'INFECTED');
+  } else if (mode.teams && me) notify(`${mode.name} — YOU ARE ${teamName(me.team)}`, mode.name);
+}
+// Opening positions: teams start on opposite sides of the map, everyone else spread out.
+function startSpawn(players) {
+  const teams = MODES[match.mode].teams && match.mode !== 'inf';
+  const mine = players.filter((p) => !teams || p.team === myTeam()).sort((a, b) => a.id - b.id);
+  const idx = Math.max(0, mine.findIndex((p) => p.id === myId));
+  if (!teams) return spawns[idx % spawns.length];
+  const side = [...spawns].sort((a, b) => (myTeam() === 0 ? a.x - b.x : b.x - a.x));
+  return side[idx % Math.min(side.length, 8)];
 }
 
 function onMyDeath(killerId) {
@@ -1939,6 +2314,7 @@ function onMyDeath(killerId) {
   $('scope').classList.add('hidden');
   $('death').classList.remove('hidden');
   $('deathBy').textContent = killerId === myId ? 'You eliminated yourself' : `Eliminated by ${pName(killerId)}`;
+  if (amZombie()) $('deathBy').textContent += '  —  you are now INFECTED';
   refreshLoadoutViews();
   clearTimeout(respawnTimer);
   respawnTimer = setTimeout(() => net.send({ t: 'respawn' }), 3000);
@@ -1958,23 +2334,33 @@ function onHurt(fromId) {
   setTimeout(() => el.remove(), 1500);
 }
 
-function showEnd(players, nukeBy) {
+function showEnd(players, nukeBy, m = {}) {
   clearTimeout(respawnTimer);
   match = null; P.alive = false; mapReady = false; nukeState = null;
+  clearObjectives();
   $('nuke').classList.add('hidden');
   $('nukeReady').classList.add('hidden');
   showViewmodel();
   for (const rp of remotes.values()) { rp.alive = false; rp.group.visible = false; }
-  const winner = players[0];
+  const winner = players[0], mode = m.mode || 'ffa', teams = MODES[mode]?.teams;
+  const names = TEAM_NAMES[mode] || [], me = players.find((p) => p.id === myId), won = teams && me && me.team === m.winTeam;
   if (nukeBy != null) {
-    $('endTitle').textContent = nukeBy === myId ? 'NUKED THEM ALL' : 'NUKED';
-    $('endWinner').textContent = `${winner?.name ?? pName(nukeBy)} ended the match with a TACTICAL NUKE`;
+    $('endTitle').textContent = nukeBy === myId ? 'NUKED THEM ALL' : teams && won ? 'VICTORY — NUKED' : 'NUKED';
+    $('endWinner').textContent = `${players.find((p) => p.id === nukeBy)?.name ?? pName(nukeBy)} ended the match with a TACTICAL NUKE`;
+  } else if (mode === 'inf') {
+    $('endTitle').textContent = won ? 'VICTORY' : 'DEFEAT';
+    $('endWinner').textContent = m.winTeam === 0 ? `SURVIVORS WIN — ${players.filter((p) => p.team === 0).map((p) => p.name).join(', ')} made it out` : 'INFECTED WIN — nobody survived';
+  } else if (teams) {
+    const sc = m.scores || [0, 0];
+    $('endTitle').textContent = m.winTeam < 0 ? 'DRAW' : won ? 'VICTORY' : 'DEFEAT';
+    $('endWinner').textContent = m.winTeam < 0 ? `${names[0]} ${sc[0]} — ${sc[1]} ${names[1]}` : `${names[m.winTeam]} win ${sc[m.winTeam]} — ${sc[1 - m.winTeam]}`;
   } else {
     $('endTitle').textContent = winner?.id === myId ? 'VICTORY' : 'MATCH OVER';
     $('endWinner').textContent = winner ? `${winner.name} wins with ${winner.kills} kills` : '';
   }
-  $('endTable').innerHTML = '<tr><th>#</th><th>PLAYER</th><th>K</th><th>D</th><th>K/D</th></tr>' + players.map((p, i) =>
-    `<tr class="${p.id === myId ? 'me' : ''}"><td>${i + 1}</td><td>${escapeHtml(p.name)}</td><td>${p.kills}</td><td>${p.deaths}</td><td>${(p.kills / Math.max(1, p.deaths)).toFixed(2)}</td></tr>`).join('');
+  const ordered = teams ? [...players].sort((a, b) => (a.team === m.winTeam ? -1 : 0) - (b.team === m.winTeam ? -1 : 0) || a.team - b.team || b.kills - a.kills) : players;
+  $('endTable').innerHTML = `<tr><th>#</th><th>PLAYER</th>${teams ? '<th>TEAM</th>' : ''}<th>K</th><th>D</th><th>K/D</th></tr>` + ordered.map((p, i) =>
+    `<tr class="${p.id === myId ? 'me' : ''}"><td>${i + 1}</td><td>${escapeHtml(p.name)}</td>${teams ? `<td style="color:${mode === 'inf' && p.team === 1 ? ZOMBIE_GREEN : TEAM_COLORS[p.team] || '#ccc'}">${names[p.team] || ''}</td>` : ''}<td>${p.kills}</td><td>${p.deaths}</td><td>${(p.kills / Math.max(1, p.deaths)).toFixed(2)}</td></tr>`).join('');
   showScreen('end');
 }
 
@@ -1990,8 +2376,8 @@ function showHitmarker(kill) {
 }
 function addKillfeed(killer, victim, w, head) {
   const el = document.createElement('div');
-  const cls = (id) => (id === myId ? 'me' : '');
-  el.innerHTML = `<b class="${cls(killer)}">${escapeHtml(pName(killer))}</b><span class="kw">${WEAPONS[w]?.name || (w === 'frag' ? 'FRAG' : '')}${head ? ' ⌖' : ''}</span><b class="${cls(victim)}">${escapeHtml(pName(victim))}</b>`;
+  const cls = (id) => (id === myId ? 'me' : match && MODES[match.mode]?.teams && !isEnemy(id) ? 'ally' : '');
+  el.innerHTML = `<b class="${cls(killer)}">${escapeHtml(pName(killer))}</b><span class="kw">${w === 'knife' ? '🔪' : WEAPONS[w]?.name || (w === 'frag' ? 'FRAG' : '')}${head ? ' ⌖' : ''}</span><b class="${cls(victim)}">${escapeHtml(pName(victim))}</b>`;
   pushFeed(el);
 }
 function addFeedText(text) { const el = document.createElement('div'); el.className = 'sys'; el.textContent = text; pushFeed(el); }
@@ -2012,10 +2398,50 @@ function notify(text, pts) {
 }
 function renderScoreboard() {
   if (!room) return;
-  const sorted = [...room.players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
-  $('sbTable').innerHTML = '<tr><th>PLAYER</th><th>LOADOUT</th><th>K</th><th>D</th><th>K/D</th></tr>' + sorted.map((p) =>
-    `<tr class="${p.id === myId ? 'me' : ''}"><td>${escapeHtml(p.name)}</td><td>${LOADOUTS[p.loadout]?.name || ''}</td><td>${p.kills}</td><td>${p.deaths}</td><td>${(p.kills / Math.max(1, p.deaths)).toFixed(2)}</td></tr>`).join('');
-  $('sbMap').textContent = `${MAPS[currentMap]?.name || ''} • ${offline ? `DEATHMATCH VS BOTS (${offline.diff.label})` : 'FREE-FOR-ALL'} • FIRST TO ${match?.scoreLimit || 30}`;
+  const mode = match?.mode || 'ffa', teams = MODES[mode].teams;
+  const row = (p) => `<tr class="${p.id === myId ? 'me' : ''}"><td>${escapeHtml(p.name)}</td><td>${mode === 'inf' && p.team === 1 ? 'ZOMBIE' : LOADOUTS[p.loadout]?.name || ''}</td><td>${p.kills}</td><td>${p.deaths}</td><td>${(p.kills / Math.max(1, p.deaths)).toFixed(2)}</td></tr>`;
+  const sort = (arr) => arr.sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+  let html = '<tr><th>PLAYER</th><th>LOADOUT</th><th>K</th><th>D</th><th>K/D</th></tr>';
+  if (!teams) html += sort([...room.players]).map(row).join('');
+  else for (const t of [myTeam() === 1 ? 1 : 0, myTeam() === 1 ? 0 : 1]) {
+    const list = sort(room.players.filter((p) => p.team === t));
+    const sc = mode === 'inf' ? `${list.length} PLAYERS` : String(match?.obj?.s?.[t] ?? 0);
+    const color = mode === 'inf' && t === 1 ? ZOMBIE_GREEN : relColor(t);
+    html += `<tr class="team"><td colspan="5" style="color:${color}">${teamName(t)} <span>${sc}</span></td></tr>` + list.map(row).join('');
+  }
+  $('sbTable').innerHTML = html;
+  const goal = mode === 'inf' ? 'SURVIVE 5:00' : `FIRST TO ${match?.scoreLimit || 30}`;
+  $('sbMap').textContent = `${MAPS[currentMap]?.name || ''} • ${MODES[mode].name}${offline ? ` VS BOTS (${offline.diff.label})` : ''} • ${goal}`;
+}
+
+// The strip under the score bar: flag states, the hill timer, or your infected role.
+function renderObjBar(now) {
+  let html = '';
+  const inZone = (x, z, r) => P.alive && Math.hypot(P.pos.x - x, P.pos.z - z) < r && P.pos.y < 6;
+  if (match.mode === 'dom') {
+    const flags = match.obj?.f || [];
+    html = MAPS[currentMap].zones.dom.map(([x, z], i) => {
+      const [owner, cap, prog, contested] = flags[i] || [-1, -1, 0, false];
+      const here = inZone(x, z, DOM_R);
+      const bar = prog > 0 ? `<i style="width:${Math.round(prog * 100)}%;background:${relColor(cap)}"></i>` : '';
+      return `<span class="flag${here ? ' here' : ''}${contested ? ' contested' : ''}" style="border-color:${relColor(owner)};color:${relColor(owner)}">${bar}<b>${'ABC'[i]}</b></span>`;
+    }).join('');
+    const here = MAPS[currentMap].zones.dom.findIndex(([x, z]) => inZone(x, z, DOM_R));
+    if (here >= 0) {
+      const [owner, , , contested] = flags[here] || [];
+      const msg = contested ? 'CONTESTED' : owner === myTeam() ? 'DEFENDING' : 'CAPTURING';
+      html += `<div class="objmsg">${msg} ${'ABC'[here]}</div>`;
+    }
+  } else if (match.mode === 'hp') {
+    const [idx, until, holder] = match.obj?.hp || [0, match.startAt + HP_ROTATE_MS, -1];
+    const left = Math.max(0, until - serverNow()), [x, z] = hpZone();
+    const status = holder === 2 ? 'CONTESTED' : holder < 0 ? 'NEUTRAL' : holder === myTeam() ? 'SECURED' : 'ENEMY HOLDS';
+    html = `<span class="hp" style="border-color:${relColor(holder)};color:${relColor(holder)}">HP ${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}</span><div class="objmsg">${inZone(x, z, HP_R) ? 'IN THE HARDPOINT — ' : ''}${status}</div>`;
+  } else if (match.mode === 'inf') {
+    const left = room.players.filter((p) => p.team === 0).length;
+    html = amZombie() ? `<div class="objmsg zombie">INFECT THEM ALL — ${left} LEFT</div>` : `<div class="objmsg">SURVIVE UNTIL THE TIMER RUNS OUT</div>`;
+  }
+  if (hudCache.obj !== html) { hudCache.obj = html; $('obj').innerHTML = html; }
 }
 
 const radarCtx = $('radar').getContext('2d');
@@ -2027,10 +2453,20 @@ function drawRadar(now) {
   g.fillStyle = 'rgba(8,14,10,0.85)'; g.fillRect(0, 0, S, S);
   g.translate(S / 2, S / 2); g.rotate(P.yaw); g.scale(PX, PX);
   if (radarImg) g.drawImage(radarImg, -mapHalf - P.pos.x, -mapHalf - P.pos.z, mapHalf * 2, mapHalf * 2);
-  g.fillStyle = '#ff3b30';
+  if (match && objGroup) {
+    const zones = match.mode === 'dom' ? MAPS[currentMap].zones.dom : [hpZone()];
+    zones.forEach(([x, z], i) => {
+      const owner = match.mode === 'dom' ? match.obj?.f?.[i]?.[0] ?? -1 : match.obj?.hp?.[2] ?? -1;
+      g.strokeStyle = relColor(owner); g.lineWidth = 0.8;
+      g.beginPath(); g.arc(x - P.pos.x, z - P.pos.z, match.mode === 'dom' ? DOM_R : HP_R, 0, Math.PI * 2); g.stroke();
+    });
+  }
   for (const rp of remotes.values()) {
-    if (!rp.alive || !rp.has || now - rp.lastShot > 2500) continue;
-    g.globalAlpha = 1 - (now - rp.lastShot) / 2500;
+    if (!rp.alive || !rp.has) continue;
+    const ally = !isEnemy(rp.id);
+    if (!ally && now - rp.lastShot > 2500) continue;
+    g.fillStyle = ally ? TEAM_COLORS[0] : '#ff3b30';
+    g.globalAlpha = ally ? 1 : 1 - (now - rp.lastShot) / 2500;
     g.beginPath(); g.arc(rp.group.position.x - P.pos.x, rp.group.position.z - P.pos.z, 1.3, 0, Math.PI * 2); g.fill();
   }
   g.restore();
@@ -2049,14 +2485,23 @@ function updateHud(now) {
     setText('timer', `${Math.floor(rem / 60000)}:${String(Math.floor(rem / 1000) % 60).padStart(2, '0')}`);
     const sorted = room ? [...room.players].sort((a, b) => b.kills - a.kills) : [];
     const me = pInfo(myId), leader = sorted.find((p) => p.id !== myId);
-    setText('scoreMe', String(me?.kills ?? 0));
-    setText('scoreTop', String(leader?.kills ?? 0));
-    setText('scoreTopName', leader ? leader.name : '—');
+    if (MODES[match.mode].teams) {
+      const t = Math.max(0, myTeam()), o = 1 - t;
+      const val = (team) => (match.mode === 'inf' ? room.players.filter((p) => p.team === team).length : match.obj?.s?.[team] ?? 0);
+      setText('scoreMeName', teamName(t)); setText('scoreMe', String(val(t)));
+      setText('scoreTopName', teamName(o)); setText('scoreTop', String(val(o)));
+    } else {
+      setText('scoreMeName', 'YOU');
+      setText('scoreMe', String(me?.kills ?? 0));
+      setText('scoreTop', String(leader?.kills ?? 0));
+      setText('scoreTopName', leader ? leader.name : '—');
+    }
+    renderObjBar(now);
     const cd = match.startAt - sNow, el = $('countdown');
     if (cd > 0) { el.classList.remove('hidden'); setText('countdown', String(Math.ceil(cd / 1000))); }
     else if (cd > -900) { el.classList.remove('hidden'); setText('countdown', 'GO!'); }
     else el.classList.add('hidden');
-    const ready = !nukeState && (me?.kills ?? 0) >= NUKE_KILLS;
+    const ready = !nukeState && match.mode !== 'inf' && (me?.kills ?? 0) >= NUKE_KILLS;
     $('nukeReady').classList.toggle('hidden', !ready);
     if (nukeState && !nukeState.boomed) {
       const left = nukeState.at - sNow;
@@ -2076,10 +2521,10 @@ function updateHud(now) {
   }
   if (P.alive && curW()) {
     const w = curW(), d = w.def;
-    setText('mag', String(w.mag));
-    setText('reserve', String(w.reserve));
+    setText('mag', d.melee ? '∞' : String(w.mag));
+    setText('reserve', d.melee ? '' : String(w.reserve));
     setText('wname', d.name);
-    $('mag').classList.toggle('low', w.mag <= Math.ceil(d.mag * 0.25));
+    $('mag').classList.toggle('low', !d.melee && w.mag <= Math.ceil(d.mag * 0.25));
     const slots = P.weapons.map((x, i) => `<span class="${i === P.cur ? 'on' : ''}">${i + 1} ${x.def.name}</span>`).join('');
     if (hudCache.slots !== slots) { hudCache.slots = slots; $('wslots').innerHTML = slots; }
     const rm = $('reloadmsg');
@@ -2210,7 +2655,18 @@ $('btnEndLobby').onclick = () => {
   else { showScreen('lobby'); renderLobby(null); }
 };
 
-// Offline deathmatch setup
+function modeCards(container, selected, canPick, onPick) {
+  container.innerHTML = '';
+  for (const [key, md] of Object.entries(MODES)) {
+    const el = document.createElement('button');
+    el.className = 'card mode' + (selected === key ? ' sel' : '') + (canPick ? '' : ' locked');
+    el.innerHTML = `<div class="ct">${md.name}</div><div class="cd">${md.desc}</div>`;
+    el.onclick = () => { if (canPick) onPick(key); };
+    container.appendChild(el);
+  }
+}
+
+// Offline bot match setup
 function showOfflineSetup() { showScreen('offline'); renderOffline(); }
 function renderOffline() {
   const maps = $('offMaps');
@@ -2232,6 +2688,7 @@ function renderOffline() {
       container.appendChild(b);
     }
   };
+  modeCards($('offModes'), settings.offMode, true, (key) => { settings.offMode = key; saveSettings(); renderOffline(); });
   seg($('offBots'), [1, 3, 5, 7, 9].map((n) => [n, String(n)]), settings.offBots, (v) => (settings.offBots = v));
   seg($('offDiff'), Object.entries(BOT_DIFF).map(([k, d]) => [k, d.label]), settings.offDiff, (v) => (settings.offDiff = v));
   refreshLoadoutViews();
@@ -2244,7 +2701,7 @@ $('btnOffStart').onclick = () => {
   if (room && ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'leave' }));
   for (const id of [...remotes.keys()]) removeRemote(id);
   room = null;
-  offline = new LocalMatch({ map: settings.offMap, bots: settings.offBots, diff: settings.offDiff, name: playerName(), loadout: P.loadout });
+  offline = new LocalMatch({ map: settings.offMap, mode: MODES[settings.offMode] ? settings.offMode : 'ffa', bots: settings.offBots, diff: settings.offDiff, name: playerName(), loadout: P.loadout });
   offline.begin();
 };
 
@@ -2291,6 +2748,7 @@ function frame(now) {
   }
   if (offline) offline.tick(dt, ui === 'hud' && !pointerLocked);
   updateRemotes(dt, now);
+  updateObjectives(now);
   updateGrenades(dt);
   updateParticles(dt);
   updateTracers(dt);

@@ -42,7 +42,7 @@ Open http://localhost:3000. No installs needed (Python 3 only; Three.js loads fr
 WASD move · Shift sprint (hold while scoped to steady aim) · Space jump · C crouch / slide while sprinting ·
 Hold F to aim (right mouse also works) · T frag grenade · Y smoke grenade · N call nuke (at 20 kills) · Left mouse fire · R reload · 1/2/Q/wheel swap · Tab scoreboard · Esc pause (loadout + settings)
 
-Mode: free-for-all, first to 30 kills or 10 minutes. Reach 20 kills to call a tactical nuke: 10-second countdown, then the match ends and the caller wins.
+Modes: Deathmatch (first to 30 kills), Domination (hold flags A/B/C, first to 200), Hardpoint (hold the moving hill, first to 150), Infected (one knife zombie; everyone it kills turns; survive 5 minutes). The host picks the mode in the lobby; all four also work offline vs bots. Reach 20 kills to call a tactical nuke (not in Infected).
 
 ## Host it 24/7 (works with this Mac off)
 
