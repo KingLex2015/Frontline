@@ -23,6 +23,7 @@ WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAPS = ["harbor", "dust", "foundry"]
 LOADOUTS = ["assault", "smg", "gunner", "marksman"]
 MODES = ["ffa", "dom", "hp", "inf"]
+CHARS = ["bulwark", "viper", "wraith", "hawk"]
 TEAM_MODES = ("dom", "hp", "inf")
 MAX_PLAYERS = 12
 SCORE_LIMIT = {"ffa": 30, "dom": 200, "hp": 150, "inf": 0}
@@ -133,6 +134,7 @@ class Player:
         self.name = "Player"
         self.room = None
         self.loadout = "assault"
+        self.char = "bulwark"
         self.team = -1
         self.reset()
 
@@ -147,7 +149,7 @@ class Player:
         self.pos = None
 
     def public(self):
-        return {"id": self.id, "name": self.name, "loadout": self.loadout, "team": self.team,
+        return {"id": self.id, "name": self.name, "loadout": self.loadout, "char": self.char, "team": self.team,
                 "kills": self.kills, "deaths": self.deaths, "hp": self.hp, "alive": self.alive}
 
 
@@ -404,6 +406,8 @@ def handle(p, m):
         p.name = clean_name(m.get("name"))
         if m.get("loadout") in LOADOUTS:
             p.loadout = m["loadout"]
+        if m.get("char") in CHARS:
+            p.char = m["char"]
         room = Room(make_code(), p)
         rooms[room.code] = room
         return join_room(p, room)
@@ -418,6 +422,8 @@ def handle(p, m):
         p.name = clean_name(m.get("name"))
         if m.get("loadout") in LOADOUTS:
             p.loadout = m["loadout"]
+        if m.get("char") in CHARS:
+            p.char = m["char"]
         return join_room(p, room)
 
     room = p.room
@@ -433,6 +439,10 @@ def handle(p, m):
     elif t == "setMode":
         if p.id == room.host_id and room.state == "lobby" and m.get("mode") in MODES:
             room.mode = m["mode"]
+            broadcast(room, lobby_state(room))
+    elif t == "setChar":
+        if m.get("char") in CHARS:
+            p.char = m["char"]
             broadcast(room, lobby_state(room))
     elif t == "setLoadout":
         if m.get("loadout") in LOADOUTS:
