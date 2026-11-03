@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
-  <script type="importmap">{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }</script>
+  <script type="importmap">{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }</script>
 </head>
 <body>
   <canvas id="c"></canvas>
@@ -71,6 +71,8 @@
         <h3>LOADOUT</h3>
         <div id="pauseLoadouts" class="cards mini"></div>
         <div id="pauseLoNote" class="muted"></div>
+        <h3>OPERATOR</h3>
+        <div id="pauseChars" class="cards chars mini"></div>
         <h3>SETTINGS</h3>
         <label class="slider">Sensitivity <input id="sens" type="range" min="0.2" max="3" step="0.05"><span id="sensVal"></span></label>
         <label class="slider">Field of view <input id="fov" type="range" min="65" max="105" step="1"><span id="fovVal"></span></label>
@@ -122,6 +124,8 @@
         <div id="modes" class="cards"></div>
         <h3>MAP <span id="mapHint" class="muted"></span></h3>
         <div id="maps" class="cards"></div>
+        <h3>OPERATOR</h3>
+        <div id="chars" class="cards chars"></div>
         <h3>LOADOUT</h3>
         <div id="loadouts" class="cards"></div>
         <button id="btnStart" class="btn primary big">START MATCH</button>
@@ -144,6 +148,8 @@
           <div><h3>BOTS</h3><div id="offBots" class="seg"></div></div>
           <div><h3>DIFFICULTY</h3><div id="offDiff" class="seg"></div></div>
         </div>
+        <h3>OPERATOR</h3>
+        <div id="offChars" class="cards chars"></div>
         <h3>LOADOUT</h3>
         <div id="offLoadouts" class="cards"></div>
         <div class="row end">

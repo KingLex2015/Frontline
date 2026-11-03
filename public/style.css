@@ -205,3 +205,11 @@ tr.me td { color: var(--accent); background: rgba(240,166,58,0.08); }
 #killfeed b.ally { color: #4aa3ff; }
 #sbTable tr.team td { font-weight: 700; letter-spacing: 3px; padding-top: 12px; border-bottom: 1px solid rgba(255,255,255,0.15); }
 #sbTable tr.team span { float: right; }
+
+/* Operator picker */
+.cards.chars { grid-template-columns: repeat(4, 1fr); }
+.card.char { align-items: center; text-align: center; padding: 8px; }
+.card.char img { width: 100%; max-width: 140px; aspect-ratio: 200 / 280; object-fit: contain; background: radial-gradient(ellipse at 50% 70%, rgba(255,255,255,0.10), transparent 70%); }
+.card.char .ct { font-size: 18px; }
+.cards.chars.mini .card.char img { max-width: 70px; }
+@media (max-width: 700px) { .cards.chars { grid-template-columns: repeat(2, 1fr); } }
