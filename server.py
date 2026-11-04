@@ -20,7 +20,7 @@ PORT = int(os.environ.get("PORT", "3000"))
 PUBLIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "public")
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-MAPS = ["harbor", "dust", "foundry"]
+MAPS = ["harbor", "dust", "foundry", "sundown"]
 LOADOUTS = ["assault", "smg", "gunner", "marksman"]
 MODES = ["ffa", "dom", "hp", "inf"]
 CHARS = ["bulwark", "viper", "wraith", "hawk"]
@@ -43,6 +43,8 @@ MAP_ZONES = {
                "hp": [(-4.5, 7.5), (5.5, -25.5), (32, 0), (0, 23), (-23.5, -6)]},
     "dust": {"dom": [(-30, 2.5), (-6, 0), (30, -3.5)],
              "hp": [(-6, 0), (0, -16), (18, 0), (0, 24), (-18, 0)]},
+    "sundown": {"dom": [(-24, 0), (0, -2), (24, 0)],
+                "hp": [(0, -2), (-24, 0), (24, 0), (-15.5, -23.5), (5.5, 31)]},
     "foundry": {"dom": [(-27, 0), (0, -7.5), (27.5, 0)],
                 "hp": [(0, -7.5), (0, -26.5), (22, -4.5), (0, 17.5), (-22, -4.5)]},
 }

@@ -223,7 +223,46 @@ const TEX = {
   }),
   cloth_r: () => canvasTex(128, (g, s) => { for (let x = 0; x < s; x += 32) { g.fillStyle = '#8c2a22'; g.fillRect(x, 0, 16, s); g.fillStyle = '#d8c9a8'; g.fillRect(x + 16, 0, 16, s); } grain(g, s, 1500, 0.2); }),
   cloth_b: () => canvasTex(128, (g, s) => { for (let x = 0; x < s; x += 32) { g.fillStyle = '#2a4e7c'; g.fillRect(x, 0, 16, s); g.fillStyle = '#d8c9a8'; g.fillRect(x + 16, 0, 16, s); } grain(g, s, 1500, 0.2); }),
+  grass: () => canvasTex(512, (g, s) => {
+    g.fillStyle = '#5f7f3a'; g.fillRect(0, 0, s, s);
+    blotch(g, s, 40, '70,95,40', 0.35, 110); blotch(g, s, 25, '140,150,80', 0.2, 90);
+    for (let i = 0; i < 9000; i++) { g.fillStyle = `rgba(${Math.random() < 0.5 ? '40,70,25' : '130,160,80'},${Math.random() * 0.5})`; g.fillRect(Math.random() * s, Math.random() * s, 1, 2 + Math.random() * 4); }
+  }),
+  sidewalk: () => canvasTex(512, (g, s) => {
+    g.fillStyle = '#b3aea4'; g.fillRect(0, 0, s, s);
+    blotch(g, s, 25, '120,115,105', 0.2, 100); grain(g, s, 12000, 0.12);
+    g.fillStyle = 'rgba(70,65,60,0.5)'; for (let i = 0; i < s; i += 128) { g.fillRect(i, 0, 3, s); g.fillRect(0, i, s, 3); }
+  }),
+  shingle: () => canvasTex(256, (g, s) => {
+    g.fillStyle = '#3d3532'; g.fillRect(0, 0, s, s);
+    for (let y = 0; y < s; y += 16) for (let x = -(y % 32); x < s; x += 32) {
+      const v = 50 + Math.random() * 25; g.fillStyle = `rgb(${v + 12},${v},${v - 4})`; g.fillRect(x + 1, y + 1, 30, 14);
+    }
+    grain(g, s, 4000, 0.15);
+  }),
+  woodfloor: () => canvasTex(256, (g, s) => {
+    g.fillStyle = '#8a6440'; g.fillRect(0, 0, s, s);
+    for (let y = 0; y < s; y += 21) { g.fillStyle = `rgba(${Math.random() < 0.5 ? 60 : 170},${Math.random() < 0.5 ? 40 : 120},20,0.25)`; g.fillRect(0, y, s, 20); g.fillStyle = 'rgba(40,25,10,0.6)'; g.fillRect(0, y + 20, s, 1); g.fillRect(Math.random() * s, y, 1, 20); }
+    grain(g, s, 3000, 0.12);
+  }),
+  picket: () => canvasTex(256, (g, s) => {
+    g.clearRect(0, 0, s, s); g.fillStyle = '#ecebe4';
+    for (let x = 4; x < s; x += 32) { g.beginPath(); g.moveTo(x, s); g.lineTo(x, 26); g.lineTo(x + 10, 6); g.lineTo(x + 20, 26); g.lineTo(x + 20, s); g.fill(); }
+    g.fillRect(0, 70, s, 14); g.fillRect(0, 190, s, 14);
+    g.fillStyle = 'rgba(0,0,0,0.12)'; for (let x = 4; x < s; x += 32) g.fillRect(x + 16, 26, 4, s);
+  }),
+  chain: () => canvasTex(128, (g, s) => {
+    g.clearRect(0, 0, s, s); g.strokeStyle = '#9aa0a4'; g.lineWidth = 2;
+    for (let i = -s; i < s * 2; i += 16) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + s, s); g.stroke(); g.beginPath(); g.moveTo(i, s); g.lineTo(i + s, 0); g.stroke(); }
+  }),
 };
+function sidingTex(hex) {
+  return () => canvasTex(256, (g, s) => {
+    g.fillStyle = hex; g.fillRect(0, 0, s, s);
+    for (let y = 0; y < s; y += 16) { g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(0, y + 14, s, 2); g.fillStyle = 'rgba(255,255,255,0.08)'; g.fillRect(0, y, s, 3); }
+    blotch(g, s, 12, '90,80,60', 0.15, 60); grain(g, s, 4000, 0.1);
+  });
+}
 function containerTex(hex) {
   return () => canvasTex(512, (g, s) => {
     g.fillStyle = hex; g.fillRect(0, 0, s, s);
@@ -260,6 +299,26 @@ const MATDEFS = {
   cont_orange: { tex: containerTex('#b8611f'), ts: 2.6, rough: 0.65, metal: 0.25, surf: 'metal' },
   cont_gray:   { tex: containerTex('#6b6f73'), ts: 2.6, rough: 0.65, metal: 0.25, surf: 'metal' },
   cont_white:  { tex: containerTex('#b9b5aa'), ts: 2.6, rough: 0.65, metal: 0.25, surf: 'metal' },
+  grass:     { tex: TEX.grass, ts: 6, rough: 1, surf: 'dust' },
+  sidewalk:  { tex: TEX.sidewalk, ts: 3, rough: 0.95, surf: 'dust' },
+  shingle:   { tex: TEX.shingle, ts: 2, rough: 0.95, surf: 'wood' },
+  woodfloor: { tex: TEX.woodfloor, ts: 2.5, rough: 0.8, surf: 'wood' },
+  picket:    { tex: TEX.picket, ts: 1.2, rough: 0.8, surf: 'wood', alpha: true },
+  chain:     { tex: TEX.chain, ts: 1.4, rough: 0.5, metal: 0.5, surf: 'metal', alpha: true },
+  siding_mint:  { tex: sidingTex('#9fc9b4'), ts: 2.4, rough: 0.85, surf: 'wood' },
+  siding_cream: { tex: sidingTex('#e1d3a8'), ts: 2.4, rough: 0.85, surf: 'wood' },
+  siding_rose:  { tex: sidingTex('#c99a8c'), ts: 2.4, rough: 0.85, surf: 'wood' },
+  trim:      { color: 0xf1efe8, rough: 0.6, surf: 'wood' },
+  drywall:   { color: 0xd9d2c3, rough: 0.95, surf: 'dust' },
+  ceiling:   { color: 0xe8e2d4, emissive: 0x6e675c, ei: 1, rough: 0.95, surf: 'dust' },
+  paint_teal:  { color: 0x2f8a86, rough: 0.35, metal: 0.4, surf: 'metal' },
+  paint_red:   { color: 0x9a2a22, rough: 0.35, metal: 0.4, surf: 'metal' },
+  paint_cream: { color: 0xe7dcc0, rough: 0.35, metal: 0.4, surf: 'metal' },
+  paint_sky:   { color: 0x7fb2cf, rough: 0.35, metal: 0.4, surf: 'metal' },
+  chrome:    { color: 0xc8ccd0, rough: 0.2, metal: 0.9, surf: 'metal' },
+  glass:     { color: 0x1d2a33, rough: 0.05, metal: 0.8, surf: 'metal' },
+  rubber:    { color: 0x1a1a1a, rough: 0.9, surf: 'dust' },
+  rock:      { color: 0xb08a63, rough: 1, surf: 'sand' },
 };
 const MATS = {};
 function mat(key) {
@@ -268,6 +327,7 @@ function mat(key) {
   const m = new THREE.MeshStandardMaterial({
     map: d.tex ? d.tex() : null, color: d.color ?? 0xffffff, roughness: d.rough ?? 0.9, metalness: d.metal ?? 0,
     emissive: d.emissive ?? 0x000000, emissiveIntensity: d.ei ?? 1,
+    alphaTest: d.alpha ? 0.5 : 0, side: d.alpha ? THREE.DoubleSide : THREE.FrontSide,
   });
   m.userData.ts = d.ts || 1;
   m.userData.surf = d.surf || 'dust';
@@ -362,6 +422,154 @@ class Builder {
     }
   }
   decal(x, z, w, d, m) { this.box(x, 0, z, w, 0.015, d, m, { collide: false, ray: false, shadow: false }); }
+  // Decoration only: any mesh, no collision, no bullet impacts.
+  deco(geo, m, x, y, z, ry = 0, rx = 0, rz = 0) {
+    const mesh = new THREE.Mesh(geo, typeof m === 'string' ? mat(m) : m);
+    mesh.position.set(x, y, z); mesh.rotation.set(rx, ry, rz);
+    mesh.castShadow = mesh.receiveShadow = true;
+    this.group.add(mesh); return mesh;
+  }
+  // A straight wall along X or Z with door/window holes: openings are { c, w, y0, y1 }.
+  wallOpen(axis, fixed, from, to, y0, y1, t, m, openings = []) {
+    const seg = (a, b, ya, yb) => {
+      if (b - a < 0.02 || yb - ya < 0.02) return;
+      if (axis === 'x') this.box((a + b) / 2, ya, fixed, b - a, yb - ya, t, m);
+      else this.box(fixed, ya, (a + b) / 2, t, yb - ya, b - a, m);
+    };
+    let cur = from;
+    for (const o of [...openings].sort((p, q) => p.c - q.c)) {
+      const a = o.c - o.w / 2, b = o.c + o.w / 2;
+      seg(cur, a, y0, y1);
+      seg(a, b, y0, o.y0);
+      seg(a, b, o.y1, y1);
+      // White frame around the opening.
+      const fy = (o.y0 + o.y1) / 2, fh = o.y1 - o.y0;
+      if (axis === 'x') { for (const e of [a, b]) this.box(e, o.y0, fixed, 0.08, fh, t + 0.06, 'trim', { collide: false }); this.box(o.c, o.y1, fixed, o.w + 0.16, 0.08, t + 0.06, 'trim', { collide: false }); }
+      else { for (const e of [a, b]) this.box(fixed, o.y0, e, t + 0.06, fh, 0.08, 'trim', { collide: false }); this.box(fixed, o.y1, o.c, t + 0.06, 0.08, o.w + 0.16, 'trim', { collide: false }); }
+      void fy;
+      cur = b;
+    }
+    seg(cur, to, y0, y1);
+  }
+  // Floor slab over [x0,x1]x[z0,z1] with a rectangular stairwell hole.
+  slab(x0, x1, z0, z1, y, th, m, hole) {
+    const piece = (a, b, c, d) => { if (b - a > 0.02 && d - c > 0.02) this.box((a + b) / 2, y, (c + d) / 2, b - a, th, d - c, m); };
+    if (!hole) return piece(x0, x1, z0, z1);
+    const [hx0, hx1, hz0, hz1] = hole;
+    piece(x0, x1, z0, hz0); piece(x0, x1, hz1, z1);
+    piece(x0, hx0, hz0, hz1); piece(hx1, x1, hz0, hz1);
+  }
+  // Straight flight of stairs climbing `height` toward +X or -X (dir), starting at x0.
+  flight(x0, z, dir, width, height, m) {
+    const n = Math.ceil(height / 0.3), sd = 0.42;
+    for (let k = 0; k < n; k++) this.box(x0 + dir * (k + 0.5) * sd, 0, z, sd, height * (k + 1) / n, width, m);
+    return x0 + dir * n * sd;
+  }
+  // Two-storey house you can walk through. Walls are 0.3 thick; floor 2 sits at y = 3.
+  // cfg.open: { n|s|e|w: [ { c, w, y0, y1 } ] } holes per side for each floor (open1, open2).
+  house(cfg) {
+    const { x0, x1, z0, z1, siding } = cfg, t = 0.3, F = 3, H = 5.8;
+    const sides = (y0, y1, open) => {
+      this.wallOpen('x', z0 + t / 2, x0, x1, y0, y1, t, siding, open.n);
+      this.wallOpen('x', z1 - t / 2, x0, x1, y0, y1, t, siding, open.s);
+      this.wallOpen('z', x0 + t / 2, z0 + t, z1 - t, y0, y1, t, siding, open.w);
+      this.wallOpen('z', x1 - t / 2, z0 + t, z1 - t, y0, y1, t, siding, open.e);
+    };
+    sides(0, F - 0.25, cfg.open1);
+    sides(F, H, cfg.open2);
+    this.box((x0 + x1) / 2, 0, (z0 + z1) / 2, x1 - x0 - 2 * t, 0.03, z1 - z0 - 2 * t, 'woodfloor', { collide: false, shadow: false });
+    // Floor band between storeys, the upstairs slab with its stairwell, and the stairs.
+    this.box((x0 + x1) / 2, F - 0.25, z0 - 0.02, x1 - x0 + 0.1, 0.25, 0.06, 'trim', { collide: false });
+    this.box((x0 + x1) / 2, F - 0.25, z1 + 0.02, x1 - x0 + 0.1, 0.25, 0.06, 'trim', { collide: false });
+    const st = cfg.stairs, len = Math.ceil(F / 0.3) * 0.42;
+    const sx0 = st.dir > 0 ? st.x : st.x - len, sx1 = st.dir > 0 ? st.x + len : st.x;
+    this.slab(x0 + t, x1 - t, z0 + t, z1 - t, F - 0.25, 0.25, 'woodfloor', [sx0 - 0.1, sx1 + 0.1, st.z - st.w / 2 - 0.1, st.z + st.w / 2 + 0.1]);
+    this.flight(st.x, st.z, st.dir, st.w, F, 'woodfloor');
+    // Painted ceilings so the rooms aren't dark wood caves.
+    const ceil = (y, hole) => {
+      const c = (a, b2, e, f) => { if (b2 - a > 0.02 && f - e > 0.02) this.box((a + b2) / 2, y, (e + f) / 2, b2 - a, 0.02, f - e, 'ceiling', { collide: false, ray: false, shadow: false }); };
+      if (!hole) return c(x0 + t, x1 - t, z0 + t, z1 - t);
+      const [a, b2, e, f] = hole;
+      c(x0 + t, x1 - t, z0 + t, e); c(x0 + t, x1 - t, f, z1 - t); c(x0 + t, a, e, f); c(b2, x1 - t, e, f);
+    };
+    ceil(F - 0.27, [sx0 - 0.1, sx1 + 0.1, st.z - st.w / 2 - 0.1, st.z + st.w / 2 + 0.1]);
+    ceil(H - 0.02);
+    // Railing along the open side of the stairwell upstairs.
+    const railZ = st.rail === 'n' ? st.z - st.w / 2 - 0.15 : st.z + st.w / 2 + 0.15;
+    this.box((sx0 + sx1) / 2 - st.dir * 0.4, F, railZ, sx1 - sx0 - 0.8, 1, 0.08, 'trim');
+    // Interior divider wall downstairs with a doorway.
+    if (cfg.divider) this.wallOpen('z', cfg.divider, z0 + t, z1 - t, 0, F - 0.25, 0.15, 'drywall', [{ c: cfg.dividerDoor, w: 1.2, y0: 0, y1: 2.3 }]);
+    // Flat roof you can't reach, under a pitched shingle roof for the look.
+    this.slab(x0 - 0.3, x1 + 0.3, z0 - 0.3, z1 + 0.3, H, 0.2, 'trim');
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, w = x1 - x0 + 0.9, d = z1 - z0 + 0.9, rise = 2.6;
+    const slope = Math.hypot(d / 2, rise), ang = Math.atan2(rise, d / 2);
+    for (const sgn of [-1, 1]) this.deco(boxGeo(w, 0.12, slope, 2), 'shingle', cx, H + 0.2 + rise / 2, cz + sgn * d / 4, 0, sgn * ang);
+    const gable = new THREE.BufferGeometry().setFromPoints([new V3(0, 0, -d / 2), new V3(0, 0, d / 2), new V3(0, rise, 0)]);
+    gable.computeVertexNormals();
+    for (const gx of [x0 - 0.3, x1 + 0.3]) this.deco(gable, new THREE.MeshStandardMaterial({ color: 0xf1efe8, roughness: 0.7, side: THREE.DoubleSide }), gx, H + 0.2, cz);
+    if (cfg.chimney) this.box(cfg.chimney[0], H, cfg.chimney[1], 0.8, 2.4, 0.8, 'brick', { collide: false });
+  }
+  fence(x0, z0, x1, z1, h, m) {
+    const alongX = Math.abs(x1 - x0) > Math.abs(z1 - z0);
+    if (alongX) this.box((x0 + x1) / 2, 0, z0, Math.abs(x1 - x0), h, 0.08, m, { ts: h });
+    else this.box(x0, 0, (z0 + z1) / 2, 0.08, h, Math.abs(z1 - z0), m, { ts: h });
+  }
+  wheels(x, z, alongX, len, wid, r = 0.38) {
+    const geo = new THREE.CylinderGeometry(r, r, 0.26, 16);
+    for (const a of [-1, 1]) for (const b of [-1, 1]) {
+      const px = alongX ? x + a * len : x + b * wid, pz = alongX ? z + b * wid : z + a * len;
+      this.deco(geo, 'rubber', px, r, pz, 0, alongX ? Math.PI / 2 : 0, alongX ? 0 : Math.PI / 2);
+    }
+  }
+  pickup(x, z, alongX, paint) {
+    const L = 5.2, W = 2.0, ax = (a) => (alongX ? [x + a, z] : [x, z + a]);
+    const B = (a, y, l, h, w, m, o) => { const [px, pz] = ax(a); return alongX ? this.box(px, y, pz, l, h, w, m, o) : this.box(px, y, pz, w, h, l, m, o); };
+    B(0, 0.45, L, 0.55, W, paint);                     // chassis
+    B(0.55, 1.0, 1.7, 0.85, W - 0.1, paint);           // cab
+    B(0.55, 1.3, 1.72, 0.45, W - 0.05, 'glass', { collide: false });
+    B(-1.35, 1.0, 2.2, 0.5, W, paint);                 // bed sides
+    B(2.1, 1.0, 1.0, 0.3, W - 0.1, paint);             // hood
+    B(2.62, 0.55, 0.06, 0.35, W, 'chrome', { collide: false });
+    this.wheels(x, z, alongX, 1.7, W / 2 - 0.05);
+  }
+  van(x, z, alongX, paint) {
+    const L = 5.6, W = 2.2, ax = (a) => (alongX ? [x + a, z] : [x, z + a]);
+    const B = (a, y, l, h, w, m, o) => { const [px, pz] = ax(a); return alongX ? this.box(px, y, pz, l, h, w, m, o) : this.box(px, y, pz, w, h, l, m, o); };
+    B(-0.3, 0.4, L - 0.6, 2.3, W, paint);
+    B(2.45, 0.4, 0.9, 1.3, W, paint);
+    B(2.0, 1.75, 0.06, 0.6, W - 0.2, 'glass', { collide: false });
+    B(-0.3, 1.45, L - 0.62, 0.35, W + 0.02, 'paint_red', { collide: false });
+    this.wheels(x, z, alongX, 1.9, W / 2 - 0.05);
+  }
+  trailer(x, z, alongX) {
+    const L = 6, W = 2.3;
+    this.box(x, 0.45, z, alongX ? L : W, 2.1, alongX ? W : L, 'paint_cream');
+    this.box(x, 1.05, z, alongX ? L + 0.02 : W + 0.02, 0.22, alongX ? W + 0.02 : L + 0.02, 'paint_teal', { collide: false });
+    const [wx, wz] = alongX ? [x, z + W / 2 + 0.01] : [x + W / 2 + 0.01, z];
+    for (const o of [-1.5, 0.3, 1.8]) this.box(alongX ? wx + o : wx, 1.35, alongX ? wz : wz + o, alongX ? 0.9 : 0.04, 0.55, alongX ? 0.04 : 0.9, 'glass', { collide: false });
+    this.wheels(x, z, alongX, 0.5, W / 2 - 0.05, 0.36);
+  }
+  sedan(x, z, alongX, paint) {
+    const L = 4.6, W = 1.9;
+    this.box(x, 0.35, z, alongX ? L : W, 0.65, alongX ? W : L, paint);
+    this.box(alongX ? x - 0.2 : x, 1.0, alongX ? z : z - 0.2, alongX ? 2.2 : W - 0.2, 0.55, alongX ? W - 0.2 : 2.2, 'glass');
+    this.wheels(x, z, alongX, 1.45, W / 2 - 0.05, 0.33);
+  }
+  pole(x, z, h = 8) {
+    this.box(x, 0, z, 0.25, h, 0.25, 'wood');
+    this.box(x, h - 0.8, z, 0.12, 0.12, 2.2, 'wood', { collide: false });
+  }
+  sign(x, z, a, b) {
+    this.box(x, 0, z, 0.08, 3.2, 0.08, 'metal');
+    for (const [txt, y, rot] of [[a, 3.0, 0], [b, 2.7, Math.PI / 2]]) {
+      const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+      const g = c.getContext('2d'); g.fillStyle = '#1f6b3a'; g.fillRect(0, 0, 256, 64); g.strokeStyle = '#fff'; g.lineWidth = 4; g.strokeRect(4, 4, 248, 56);
+      g.fillStyle = '#fff'; g.font = '700 34px Rajdhani, Arial'; g.textAlign = 'center'; g.fillText(txt, 128, 44);
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+      this.deco(new THREE.BoxGeometry(1.2, 0.28, 0.03), new THREE.MeshStandardMaterial({ map: t }), x, y, z, rot);
+    }
+  }
+  mailbox(x, z) { this.box(x, 0, z, 0.08, 1.0, 0.08, 'wood'); this.box(x, 1.0, z, 0.25, 0.25, 0.45, 'paint_sky'); }
   lamp(x, z, h = 6) {
     this.box(x, 0, z, 0.18, h, 0.18, 'metal');
     this.box(x, h, z, 0.5, 0.18, 0.9, 'metal', { collide: false });
@@ -437,6 +645,94 @@ const MAPS = {
         if (Math.abs(x) < 9 && Math.abs(z) < 9) continue;
         if (b.colliders.some((c) => x + 1.5 > c.min.x && x - 1.5 < c.max.x && z + 1.5 > c.min.z && z - 1.5 < c.max.z)) continue;
         if (r() < 0.6) b.crate(x, z, 1.2, 1 + Math.floor(r() * 2)); else b.barrel(x, z, 0x7a5a30);
+      }
+    },
+  },
+  sundown: {
+    name: 'SUNDOWN', desc: '1960s desert town • two houses, fast & close', half: 34,
+    zones: { dom: [[-24, 0], [0, -2], [24, 0]], hp: [[0, -2], [-24, 0], [24, 0], [-15.5, -23.5], [5.5, 31]] },
+    env: { sky: [0x5b9ae0, 0xf3dfc2], fog: [0xead9c0, 70, 280], sun: [0xfff0d4, 3.4, [40, 75, 25]], hemi: [0xcfe0ff, 0x8a7458, 1.05], exposure: 1.05 },
+    build(b) {
+      const W = (c, w = 1.4) => ({ c, w, y0: 1.0, y1: 2.15 });         // ground-floor window
+      const U = (c, w = 1.3) => ({ c, w, y0: 4.0, y1: 5.15 });         // upstairs window
+      const D = (c, w = 1.3) => ({ c, w, y0: 0, y1: 2.3 });            // doorway
+      b.ground('sand', 260);
+      b.perimeter(34, 3, 'chain');
+      // Street, sidewalks, lawns and driveways.
+      b.decal(0, 0, 68, 12, 'asphalt');
+      for (let x = -30; x <= 30; x += 6) b.box(x, 0.016, 0, 3, 0.005, 0.18, 'paint_y', { collide: false, ray: false, shadow: false });
+      b.decal(0, -7, 68, 2, 'sidewalk'); b.decal(0, 7, 68, 2, 'sidewalk');
+      b.decal(0, -21, 68, 26, 'grass'); b.decal(0, 21, 68, 26, 'grass');
+      b.box(3, 0.02, -11.2, 3.6, 0.02, 6.4, 'sidewalk', { collide: false, shadow: false });
+      b.box(-1, 0.02, 11.4, 3.6, 0.02, 6.8, 'sidewalk', { collide: false, shadow: false });
+      b.box(-8, 0.02, -11, 1.4, 0.02, 6, 'sidewalk', { collide: false, shadow: false });
+      b.box(5, 0.02, 11, 1.4, 0.02, 6, 'sidewalk', { collide: false, shadow: false });
+
+      // --- House A (north side, mint): front door faces the street.
+      b.house({ x0: -12, x1: 0, z0: -24, z1: -14, siding: 'siding_mint',
+        open1: { s: [D(-8), W(-3.2), W(-10.6, 1.1)], n: [D(-2), W(-5)], w: [W(-18)], e: [D(-16, 1.1)] },
+        open2: { s: [U(-10), U(-6), U(-2.2)], n: [U(-9), U(-3.5)], w: [U(-19)], e: [U(-21)] },
+        stairs: { x: -11.6, z: -22.6, dir: 1, w: 1.2, rail: 's' }, divider: -5, dividerDoor: -17, chimney: [-10.5, -15.5] });
+      // Garage A with an open door, then its flat roof.
+      b.wallOpen('x', -14.65, 0, 6, 0, 3.2, 0.3, 'siding_mint', [{ c: 3, w: 3.2, y0: 0, y1: 2.6 }]);
+      b.wallOpen('x', -22.85, 0, 6, 0, 3.2, 0.3, 'siding_mint');
+      b.wallOpen('z', 5.85, -22.7, -14.8, 0, 3.2, 0.3, 'siding_mint', [W(-19, 1.2)]);
+      b.box(3, 3.2, -18.75, 6.6, 0.22, 8.8, 'shingle');
+      b.crate(1.2, -21.6, 1.1, 2); b.barrel(4.8, -21.8, 0x8a3a2a); b.box(4.6, 0, -16.2, 1.6, 0.9, 0.7, 'wood');
+
+      // --- House B (south side, cream): different floor plan, porch out front.
+      b.house({ x0: 2, x1: 13, z0: 14, z1: 25, siding: 'siding_cream',
+        open1: { n: [D(5), W(10.2)], s: [D(4), W(7.2)], e: [W(19.5)], w: [D(22, 1.1), W(17)] },
+        open2: { n: [U(4), U(8), U(11.4)], s: [U(5), U(10)], e: [U(20)], w: [U(18)] },
+        stairs: { x: 12.6, z: 24.0, dir: -1, w: 1.2, rail: 'n' }, divider: 6.5, dividerDoor: 17.5, chimney: [11.5, 15.5] });
+      for (const px of [2.4, 7.6]) b.box(px, 0, 12.4, 0.2, 2.7, 0.2, 'trim');
+      b.box(5, 2.7, 13, 6, 0.18, 2.2, 'shingle');
+      b.box(5, 0, 12.9, 5.4, 0.18, 2, 'wood', { collide: false });
+      // Garage B
+      b.wallOpen('x', 15.15, -4.5, 2, 0, 3.2, 0.3, 'siding_cream', [{ c: -1.25, w: 3.2, y0: 0, y1: 2.6 }]);
+      b.wallOpen('x', 24.35, -4.5, 2, 0, 3.2, 0.3, 'siding_cream');
+      b.wallOpen('z', -4.35, 15.3, 24.2, 0, 3.2, 0.3, 'siding_cream', [W(19.5, 1.2)]);
+      b.box(-1.25, 3.2, 19.75, 7.1, 0.22, 9.6, 'shingle');
+      b.crate(-3.2, 22.8, 1.1); b.barrel(0.8, 23.2); b.box(-3, 0, 17, 0.7, 1.4, 1.8, 'metal');
+
+      // --- Street cover: vehicles of my own design.
+      b.pickup(-15, -2.6, true, 'paint_teal');
+      b.van(15, 2.6, true, 'paint_sky');
+      b.trailer(-1.5, 3.0, true);
+      b.sedan(6.5, -3.0, true, 'paint_red');
+      b.sedan(3, -10.5, false, 'paint_cream');
+      b.pickup(-1.2, 10.8, false, 'paint_red');
+
+      // --- Front yards: picket fences with gaps for the paths.
+      b.fence(-26, -9, -9, -9, 1.0, 'picket'); b.fence(-7, -9, 0.8, -9, 1.0, 'picket');
+      b.fence(5.4, -9, 26, -9, 1.0, 'picket');
+      b.fence(-26, 9, -3.4, 9, 1.0, 'picket'); b.fence(1.6, 9, 4, 9, 1.0, 'picket'); b.fence(6, 9, 26, 9, 1.0, 'picket');
+      b.mailbox(-9.6, -8.4); b.mailbox(6.6, 8.4);
+      b.sign(-19.5, -7.6, 'MESA DR', 'CACTUS LN');
+      for (const [x, z] of [[-26, -7.6], [-4, 7.6], [12, -7.6], [27, 7.6]]) b.lamp(x, z, 5.5);
+      for (const [x, z] of [[-30, 8.2], [-10, -8.2], [10, 8.2], [30, -8.2]]) b.pole(x, z);
+
+      // --- Back yards: sheds, fences, clutter.
+      b.fence(-26, -27.5, -14, -27.5, 1.0, 'picket'); b.fence(-10, -27.5, 10, -27.5, 1.0, 'picket');
+      b.building(-18, -31, 4.5, 3.4, 2.6, ['e'], 'siding_rose', 'shingle');
+      b.box(-4, 0, -31, 2.2, 0.75, 1.0, 'wood'); for (const dz of [-0.9, 0.9]) b.box(-4, 0, -31 + dz, 2.2, 0.45, 0.35, 'wood');
+      b.crate(6, -31, 1.2, 2); b.crate(7.4, -30.6, 1.2); b.barrel(9, -32);
+      b.fence(-10, 27.5, 0, 27.5, 1.0, 'picket'); b.fence(4, 27.5, 26, 27.5, 1.0, 'picket');
+      b.building(19, 30.5, 4.5, 3.4, 2.6, ['w'], 'siding_rose', 'shingle');
+      b.box(9, 0, 31, 0.9, 0.9, 0.9, 'metal'); b.crate(-6, 30.5, 1.2, 2); b.crate(-4.6, 31, 1.2); b.barrel(-8, 31.5, 0x8a3a2a);
+      // --- Side lots at each end of the street.
+      b.container(-29.5, -18, 1, 'orange'); b.crate(-27.5, 16, 1.3, 2); b.crate(-29, 18, 1.3); b.barrel(-26.5, 20);
+      b.container(29.5, 18, 1, 'gray'); b.crate(27.5, -16, 1.3, 2); b.crate(29, -18.2, 1.3); b.barrel(26.5, -20, 0x8a3a2a);
+      b.box(-22, 0, 14, 0.9, 1, 4, 'sandbag'); b.box(22, 0, -14, 0.9, 1, 4, 'sandbag');
+
+      // --- Backdrop: a water tower and desert mesas beyond the fence.
+      for (const [lx, lz] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) b.deco(new THREE.CylinderGeometry(0.15, 0.15, 14, 6), 'metal', 12 + lx, 7, -48 + lz);
+      b.deco(new THREE.CylinderGeometry(3.2, 3.2, 4, 18), 'cont_white', 12, 16, -48);
+      b.deco(new THREE.ConeGeometry(3.4, 1.4, 18), 'metal', 12, 18.7, -48);
+      const r = mulberry32(77);
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2 + r() * 0.3, dist = 120 + r() * 40, h = 14 + r() * 26;
+        b.deco(new THREE.CylinderGeometry(10 + r() * 14, 22 + r() * 18, h, 7), 'rock', Math.cos(a) * dist, h / 2 - 1, Math.sin(a) * dist, r() * 3);
       }
     },
   },
