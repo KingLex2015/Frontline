@@ -36,7 +36,7 @@ const MODES = {
   ffa: { name: 'DEATHMATCH', desc: 'Free-for-all. Every soldier for themselves. First to 30 kills.', teams: false },
   dom: { name: 'DOMINATION', desc: 'Two teams fight over flags A, B and C. Each flag you hold scores. First to 200.', teams: true },
   hp:  { name: 'HARDPOINT',  desc: 'Stand in the hill to score. It moves every minute. First to 150.', teams: true },
-  dday: { name: 'D-DAY', desc: '100 vs 100 on Normandy. Random role: storm the beach by boat, drop in by parachute, or fly a fighter and bomb. Hold flags A, B, C. First to 300.', teams: true, map: 'normandy' },
+  dday: { name: 'D-DAY', desc: '50 vs 50 on Normandy. Pick your role: storm the beach by boat, drop in by parachute, or fly a fighter and bomb. Hold flags A, B, C. First to 300.', teams: true, map: 'normandy' },
   inf: { name: 'INFECTED',   desc: 'One slow zombie with a knife. Survivors are fast. Everyone it kills turns. Survive 5 minutes.', teams: true },
 };
 const TEAM_NAMES = { dday: ['ALLIES', 'AXIS'], dom: ['RANGERS', 'SPECTRE'], hp: ['RANGERS', 'SPECTRE'], inf: ['SURVIVORS', 'INFECTED'] };
@@ -44,12 +44,12 @@ const TEAM_COLORS = ['#4aa3ff', '#ff4a3d'];
 const ZOMBIE_GREEN = '#8fdc3a';
 const INF_SURVIVOR_SPEED = 1.18; // Infected: survivors get a speed boost, zombies are slowed by the knife's move value
 const DOM_R = 3.5, HP_R = 4, HP_ROTATE_MS = 60000, DDAY_R = 8; // must match server.py
-// D-Day plays its flags like Domination, with bigger flag zones for 200 players.
+// D-Day plays its flags like Domination, with bigger flag zones for 100 players.
 const isDom = (mode) => mode === 'dom' || mode === 'dday';
 const domR = (mode) => (mode === 'dday' ? DDAY_R : DOM_R);
 
 
-const settings = Object.assign({ sens: 1, fov: 80, vol: 0.7, name: '', loadout: 'assault', char: 'bulwark', offMap: 'harbor', offMode: 'ffa', offBots: 5, offDiff: 'normal' },
+const settings = Object.assign({ sens: 1, fov: 80, vol: 0.7, name: '', loadout: 'assault', char: 'bulwark', offMap: 'harbor', offMode: 'ffa', offBots: 5, offDiff: 'normal', ddayRole: 'random' },
   (() => { try { return JSON.parse(localStorage.getItem('frontline-settings')) || {}; } catch { return {}; } })());
 function saveSettings() { try { localStorage.setItem('frontline-settings', JSON.stringify(settings)); } catch {} }
 
@@ -2824,6 +2824,16 @@ function onMsg(m) {
     case 'error':
       $('menuErr').textContent = m.msg;
       break;
+    case 'role': {
+      const info = pInfo(m.id);
+      if (info) info.role = m.role;
+      botDirector?.onRole(m.id, m.role);
+      if (m.id === myId) { notify(P.alive ? 'Starts on your next spawn' : `Deploying as ${ROLE_NAMES[m.role]}`, ROLE_NAMES[m.role]); refreshRoleViews(); }
+      break;
+    }
+    case 'roleFull':
+      notify(`Every ${ROLE_NAMES[m.role]} slot on your team is taken by a player`, 'ROLE FULL');
+      break;
     case 'lobby': {
       const prev = room;
       room = m;
@@ -3042,10 +3052,10 @@ class LocalMatch {
         pos: new V3(), vel: new V3(), grounded: true, yaw: 0, pitch: 0, mag: WEAPONS[gun].mag, ai: null, sentAt: 0 });
     }
     if (this.mode === 'dday' && cfg.roster !== false) {
-      const quota = [{ inf: 50, para: 25, jet: 25 }, { inf: 50, para: 25, jet: 25 }];
+      const quota = [{ inf: 20, para: 15, jet: 15 }, { inf: 20, para: 15, jet: 15 }];
       this.me.team = Math.random() < 0.5 ? 0 : 1;
       const roles = Object.keys(quota[0]);
-      this.me.role = roles[Math.floor(Math.random() * roles.length)];
+      this.me.role = ROLE_NAMES[cfg.role] ? cfg.role : roles[Math.floor(Math.random() * roles.length)];
       quota[this.me.team][this.me.role]--;
       let id = 2;
       for (const team of [0, 1]) for (const [role, n] of Object.entries(quota[team])) for (let i = 0; i < n; i++) this.bots.push(this.makeDdayBot(id++, team, role));
@@ -3102,6 +3112,16 @@ class LocalMatch {
       case 'setChar': if (CHARACTERS[m.char]) this.me.char = m.char; break;
       case 'nuke': if (this.mode !== 'inf' && this.me.kills >= NUKE_KILLS) this.callNuke(1); break;
       case 'crash': if (this.me.alive) this.killSelf(this.me, 'crash'); break;
+      case 'setRole': {
+        if (this.mode !== 'dday' || !ROLE_NAMES[m.role] || m.role === this.me.role) break;
+        const pool = this.bots.filter((b) => b.team === this.me.team && b.role === m.role).sort((a, c) => a.alive - c.alive);
+        if (!pool.length) { this.send({ t: 'roleFull', role: m.role }); break; }
+        const b = pool[0];
+        [b.role, this.me.role] = [this.me.role, m.role];
+        this.send({ t: 'role', id: this.me.id, role: this.me.role });
+        this.send({ t: 'role', id: b.id, role: b.role });
+        break;
+      }
     }
   }
   // Deaths with nobody to blame: crashing a plane.
@@ -3657,6 +3677,7 @@ class HostBots extends LocalMatch {
   }
   onKilled(id) { const b = this.bots.find((x) => x.id === id); if (b) { b.alive = false; b.diedAt = serverNow(); b.asked = false; } }
   onSpawned(id) { const b = this.bots.find((x) => x.id === id); if (b && !b.alive) { b.alive = true; b.hp = 100; this.spawnDdayBot(b); } }
+  onRole(id, role) { const b = this.bots.find((x) => x.id === id); if (b) b.role = role; }
   onDamage(m) { const b = this.bots.find((x) => x.id === m.target); if (b?.ai) { b.ai.alertId = m.from; b.ai.alertUntil = serverNow() + 3000; } }
 }
 
@@ -3717,6 +3738,35 @@ function pickLoadout(key) {
   net.send({ t: 'setLoadout', loadout: key });
   refreshLoadoutViews();
 }
+const ROLE_DESC = { random: 'Let the game pick', inf: 'Allies land by boat, Axis hold the trenches', para: 'Drop in by parachute', jet: 'Fly a fighter: guns and bombs' };
+function roleCards(container, selected, onPick, keysHint) {
+  container.innerHTML = '';
+  (isDday() ? ['inf', 'para', 'jet'] : ['random', 'inf', 'para', 'jet']).forEach((key, i) => {
+    const el = document.createElement('button');
+    el.className = 'card' + (key === selected ? ' sel' : '');
+    el.innerHTML = `<div class="ct">${keysHint ? `<kbd>${7 + i}</kbd>` : ''}${key === 'random' ? 'RANDOM' : ROLE_NAMES[key]}</div><div class="cd">${ROLE_DESC[key]}</div>`;
+    el.onclick = () => onPick(key);
+    container.appendChild(el);
+  });
+}
+// Before a match this is your preferred D-Day role; during one it asks to trade roles with a bot.
+function pickRole(key) {
+  if (key !== 'random' && !ROLE_NAMES[key]) return;
+  settings.ddayRole = key; saveSettings();
+  if (isDday()) { if (key !== 'random' && key !== roleOf(myId)) net.send({ t: 'setRole', role: key }); }
+  else if (room && !offline) net.send({ t: 'setRole', role: key });
+  refreshRoleViews();
+}
+function refreshRoleViews() {
+  const inMatch = isDday(), lobby = ui === 'lobby' && room?.mode === 'dday', off = ui === 'offline' && settings.offMode === 'dday';
+  $('roleWrap').classList.toggle('hidden', !lobby);
+  $('offRoleWrap').classList.toggle('hidden', !off);
+  $('deathRoleWrap').classList.toggle('hidden', !inMatch);
+  $('pauseRoleWrap').classList.toggle('hidden', !inMatch);
+  if (lobby) roleCards($('roles'), settings.ddayRole, pickRole);
+  if (off) roleCards($('offRoles'), settings.ddayRole, pickRole);
+  if (inMatch) { roleCards($('deathRoles'), roleOf(myId), pickRole, true); roleCards($('pauseRoles'), roleOf(myId), pickRole); }
+}
 function refreshLoadoutViews() {
   const sel = P.pendingLoadout || P.loadout;
   if (ui === 'lobby') { loadoutCards($('loadouts'), sel, pickLoadout); charCards($('chars'), settings.char); }
@@ -3725,6 +3775,7 @@ function refreshLoadoutViews() {
   loadoutCards($('deathLoadouts'), sel, pickLoadout, true);
   loadoutCards($('pauseLoadouts'), sel, pickLoadout);
   $('pauseLoNote').textContent = P.pendingLoadout && P.alive ? `${LOADOUTS[P.pendingLoadout].name} equips on your next spawn.` : '';
+  refreshRoleViews();
 }
 
 function renderLobby(prev) {
@@ -4153,6 +4204,8 @@ addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (e.repeat) return;
   const now = performance.now();
+  const ri = ['Digit7', 'Digit8', 'Digit9'].indexOf(e.code);
+  if (ri >= 0 && isDday()) pickRole(['inf', 'para', 'jet'][ri]);
   if (!P.alive) {
     const idx = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
     if (idx >= 0) pickLoadout(Object.keys(LOADOUTS)[idx]);
@@ -4219,11 +4272,11 @@ async function withServer(fn) {
   $('menuErr').textContent = '';
   try { await connect(); fn(); } catch (err) { $('menuErr').textContent = err.message; }
 }
-$('btnCreate').onclick = () => withServer(() => { track('private_match_create'); net.send({ t: 'create', name: playerName(), loadout: P.loadout, char: settings.char }); });
+$('btnCreate').onclick = () => withServer(() => { track('private_match_create'); net.send({ t: 'create', name: playerName(), loadout: P.loadout, char: settings.char, role: settings.ddayRole }); });
 $('btnJoin').onclick = () => {
   const code = $('joinCode').value.trim().toUpperCase();
   if (code.length < 4) { $('menuErr').textContent = 'Enter the 6-character match code.'; return; }
-  withServer(() => { track('private_match_join'); net.send({ t: 'join', code, name: playerName(), loadout: P.loadout, char: settings.char }); });
+  withServer(() => { track('private_match_join'); net.send({ t: 'join', code, name: playerName(), loadout: P.loadout, char: settings.char, role: settings.ddayRole }); });
 };
 $('joinCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnJoin').click(); });
 $('btnCopy').onclick = async () => {
@@ -4278,7 +4331,7 @@ function renderOffline() {
     }
   };
   modeCards($('offModes'), settings.offMode, true, (key) => { settings.offMode = key; saveSettings(); renderOffline(); });
-  if (dday) $('offBots').innerHTML = '<span class="muted">100 vs 100 — bots fill every slot</span>';
+  if (dday) $('offBots').innerHTML = '<span class="muted">50 vs 50 — bots fill every slot</span>';
   else seg($('offBots'), [1, 3, 5, 7, 9].map((n) => [n, String(n)]), settings.offBots, (v) => (settings.offBots = v));
   seg($('offDiff'), Object.entries(BOT_DIFF).map(([k, d]) => [k, d.label]), settings.offDiff, (v) => (settings.offDiff = v));
   refreshLoadoutViews();
@@ -4292,7 +4345,7 @@ $('btnOffStart').onclick = () => {
   for (const id of [...remotes.keys()]) removeRemote(id);
   room = null;
   const mode = MODES[settings.offMode] ? settings.offMode : 'ffa';
-  offline = new LocalMatch({ map: mode === 'dday' ? 'normandy' : settings.offMap, mode, bots: mode === 'dday' ? 0 : settings.offBots, diff: settings.offDiff, name: playerName(), loadout: P.loadout, char: settings.char });
+  offline = new LocalMatch({ map: mode === 'dday' ? 'normandy' : settings.offMap, mode, bots: mode === 'dday' ? 0 : settings.offBots, role: settings.ddayRole, diff: settings.offDiff, name: playerName(), loadout: P.loadout, char: settings.char });
   offline.begin();
 };
 
@@ -4360,5 +4413,6 @@ function frame(now) {
 }
 loadMap('harbor');
 requestAnimationFrame(frame);
+
 
 
