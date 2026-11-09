@@ -26,7 +26,7 @@ MODES = ["ffa", "dom", "hp", "inf", "dday"]
 CHARS = ["bulwark", "viper", "wraith", "hawk"]
 TEAM_MODES = ("dom", "hp", "inf", "dday")
 MAX_PLAYERS = 12
-SCORE_LIMIT = {"ffa": 30, "dom": 200, "hp": 150, "inf": 0, "dday": 300}
+SCORE_LIMIT = {"ffa": 30, "dom": 200, "hp": 150, "inf": 0, "dday": 500}
 # D-Day: 100 soldiers, 50 a side. Per side: landing infantry, paratroopers, fighter pilots.
 DDAY_ROLES = ({"inf": 20, "para": 15, "jet": 15}, {"inf": 20, "para": 15, "jet": 15})
 DDAY_TIME_MS = 15 * 60 * 1000
@@ -54,8 +54,8 @@ MAP_ZONES = {
                 "hp": [(0, -2), (-24, 0), (24, 0), (-15.5, -23.5), (5.5, 31)]},
     "foundry": {"dom": [(-27, 0), (0, -7.5), (27.5, 0)],
                 "hp": [(0, -7.5), (0, -26.5), (22, -4.5), (0, 17.5), (-22, -4.5)]},
-    "normandy": {"dom": [(-25, -40), (25, 10), (85, 50)],
-                 "hp": [(-25, -40), (25, 10), (85, 50)]},
+    "normandy": {"dom": [(-25, -120), (-25, 100), (25, 10), (110, 110), (150, -90)],
+                 "hp": [(-25, -120), (-25, 100), (25, 10), (110, 110), (150, -90)]},
 }
 
 
