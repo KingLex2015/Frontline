@@ -213,3 +213,6 @@ tr.me td { color: var(--accent); background: rgba(240,166,58,0.08); }
 .card.char .ct { font-size: 18px; }
 .cards.chars.mini .card.char img { max-width: 70px; }
 @media (max-width: 700px) { .cards.chars { grid-template-columns: repeat(2, 1fr); } }
+
+/* ---------- D-Day ---------- */
+#flighthud { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); padding: 6px 16px; background: rgba(0,0,0,0.5); font-size: 18px; font-weight: 700; letter-spacing: 2px; color: var(--text); white-space: nowrap; }

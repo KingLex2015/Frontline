@@ -7,6 +7,42 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <!-- Google Analytics player stats. Put your Measurement ID (G-...) in GA_ID to turn them on. -->
+  <script>
+    window.GA_ID = '';
+    window.track = function () {};
+    if (/^G-[A-Z0-9]+$/.test(window.GA_ID)) {
+      var ga = document.createElement('script');
+      ga.async = true;
+      ga.src = 'https://www.googletagmanager.com/gtag/js?id=' + window.GA_ID;
+      document.head.appendChild(ga);
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = function () { dataLayer.push(arguments); };
+      gtag('js', new Date());
+      gtag('config', window.GA_ID);
+      window.track = function (name, params) { gtag('event', name, params || {}); };
+    }
+  </script>
+  <!-- Google AdSense game ads (H5 Ad Placement API), shown when you die.
+       Put your publisher ID (ca-pub-...) in ADSENSE_ID. Leave ADSENSE_TEST on until
+       Google approves the site; test ads look real but don't earn money. -->
+  <script>
+    window.ADSENSE_ID = '';
+    window.ADSENSE_TEST = true;
+    if (/^ca-pub-\d+$/.test(window.ADSENSE_ID)) {
+      var ad = document.createElement('script');
+      ad.async = true;
+      ad.crossOrigin = 'anonymous';
+      ad.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=' + window.ADSENSE_ID;
+      ad.setAttribute('data-ad-client', window.ADSENSE_ID);
+      ad.setAttribute('data-ad-frequency-hint', '30s');
+      if (window.ADSENSE_TEST) ad.setAttribute('data-adbreak-test', 'on');
+      document.head.appendChild(ad);
+      window.adsbygoogle = window.adsbygoogle || [];
+      window.adBreak = window.adConfig = function (o) { adsbygoogle.push(o); };
+      adConfig({ preloadAdBreaks: 'on', sound: 'on' });
+    }
+  </script>
   <script type="importmap">{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }</script>
 </head>
 <body>
@@ -38,6 +74,7 @@
     <div id="nukeReady" class="hidden">☢ NUKE READY — PRESS <kbd>N</kbd></div>
     <div id="nukeflash"></div>
     <div id="reloadmsg" class="hidden"></div>
+    <div id="flighthud" class="hidden"></div>
 
     <div id="health">
       <div class="hplbl">HEALTH</div>
@@ -55,7 +92,7 @@
       <div class="big">ELIMINATED</div>
       <div id="deathBy"></div>
       <div id="respawnIn"></div>
-      <div class="muted">Press 1–4 to change loadout for your next life</div>
+      <div class="muted">Press 1–4 to change loadout for your next life • SPACE to deploy</div>
       <div id="deathLoadouts" class="cards mini"></div>
     </div>
 
