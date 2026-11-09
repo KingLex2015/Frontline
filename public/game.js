@@ -36,7 +36,7 @@ const MODES = {
   ffa: { name: 'DEATHMATCH', desc: 'Free-for-all. Every soldier for themselves. First to 30 kills.', teams: false },
   dom: { name: 'DOMINATION', desc: 'Two teams fight over flags A, B and C. Each flag you hold scores. First to 200.', teams: true },
   hp:  { name: 'HARDPOINT',  desc: 'Stand in the hill to score. It moves every minute. First to 150.', teams: true },
-  dday: { name: 'D-DAY', desc: '50 vs 50 on Normandy. Pick your role: storm the beach by boat, drop in by parachute, or fly a fighter and bomb. Hold flags A, B, C. First to 300.', teams: true, map: 'normandy' },
+  dday: { name: 'D-DAY', desc: '50 vs 50 on Normandy. Pick your role: storm the beach by boat, drop in by parachute, or fly a fighter and bomb. Hold flags A to E. First to 500.', teams: true, map: 'normandy' },
   inf: { name: 'INFECTED',   desc: 'One slow zombie with a knife. Survivors are fast. Everyone it kills turns. Survive 5 minutes.', teams: true },
 };
 const TEAM_NAMES = { dday: ['ALLIES', 'AXIS'], dom: ['RANGERS', 'SPECTRE'], hp: ['RANGERS', 'SPECTRE'], inf: ['SURVIVORS', 'INFECTED'] };
@@ -787,38 +787,45 @@ const MAPS = {
     },
   },
   normandy: {
-    name: 'NORMANDY', desc: 'D-Day • beach landing, bunkers, village & hedgerows', half: 160, dday: true,
-    zones: { dom: [[-25, -40], [25, 10], [85, 50]], hp: [[-25, -40], [25, 10], [85, 50]] },
-    env: { sky: [0x7890a8, 0xd5d8d4], fog: [0xb7bfc3, 90, 340], sun: [0xfff0d8, 2.9, [-70, 95, 45]], hemi: [0xc8d4e2, 0x6b6450, 1.15], exposure: 1.0 },
+    name: 'NORMANDY', desc: 'D-Day • long beach, bunkers, two villages, a manor, hedgerows & a gun battery', half: 240, dday: true,
+    // A and B: bunkers on the bluff. C: the village. D: the farm. E: the gun battery.
+    zones: { dom: [[-25, -120], [-25, 100], [25, 10], [110, 110], [150, -90]], hp: [[-25, -120], [-25, 100], [25, 10], [110, 110], [150, -90]] },
+    env: { sky: [0x7890a8, 0xd5d8d4], fog: [0xb7bfc3, 110, 420], sun: [0xfff0d8, 2.9, [-70, 95, 45]], hemi: [0xc8d4e2, 0x6b6450, 1.15], exposure: 1.0 },
     build(b) {
       const r = mulberry32(1944);
-      const H = 160;
+      const H = 240;
+      // Hedgerows stay out of the villages, the farm, the battery and the rear camp.
+      const keep = [[-2, -180, 60, 72], [84, 84, 140, 136], [126, -140, 178, -40], [26, 148, 80, 196], [196, -60, 236, 90]];
+      const open = (x0, z0, x1, z1) => !keep.some(([a, c, e, f]) => x1 > a && x0 < e && z1 > c && z0 < f);
       // Beach sand to the west (sea floor too), fields inland.
       // Ground runs far past the fog so you never see an edge, even from a plane.
-      b.box(-330, -1, 0, 600, 1, 1400, 'sand', { collide: false, shadow: false });
-      b.box(320, -1, 0, 700, 1, 1400, 'grass', { collide: false, shadow: false });
+      b.box(-390, -1, 0, 720, 1, 1800, 'sand', { collide: false, shadow: false });
+      b.box(435, -1, 0, 930, 1, 1800, 'grass', { collide: false, shadow: false });
       // The sea: a moving water surface over the shallow sand.
-      const water = new THREE.Mesh(new THREE.PlaneGeometry(900, 1400, 1, 1).rotateX(-Math.PI / 2),
+      const water = new THREE.Mesh(new THREE.PlaneGeometry(1100, 1800, 1, 1).rotateX(-Math.PI / 2),
         new THREE.MeshStandardMaterial({ color: 0x31586a, roughness: 0.25, metalness: 0.2, transparent: true, opacity: 0.88 }));
-      water.position.set(-545, 0.12, 0);
+      water.position.set(-645, 0.12, 0);
       water.receiveShadow = true;
       water.userData.water = true;
       b.group.add(water);
       b.decal(-92, 0, 6, 2 * H, 'sand');
-      // Czech hedgehogs: steel beach obstacles.
-      const beam = new THREE.BoxGeometry(0.18, 0.18, 2.3);
+      // Czech hedgehogs: steel beach obstacles, merged into one mesh because there are hundreds.
+      const beam = new THREE.BoxGeometry(0.18, 0.18, 2.3), beams = [];
+      const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new V3(1, 1, 1);
+      const beamAt = (x, y, z, ry, rx, rz) => beams.push(beam.clone().applyMatrix4(m4.compose(new V3(x, y, z), q.setFromEuler(new THREE.Euler(rx, ry, rz)), one)));
       for (let x = -86; x <= -50; x += 9) {
         for (let z = -H + 8; z <= H - 8; z += 11) {
           if (r() < 0.35) continue;
           const hx = x + (r() - 0.5) * 4, hz = z + (r() - 0.5) * 5;
-          b.deco(beam, 'steel', hx, 0.65, hz, 0.4, 0.75, 0);
-          b.deco(beam, 'steel', hx, 0.65, hz, -0.4, -0.75, 0);
-          b.deco(beam, 'steel', hx, 0.65, hz, Math.PI / 2, 0, 0.8);
+          beamAt(hx, 0.65, hz, 0.4, 0.75, 0);
+          beamAt(hx, 0.65, hz, -0.4, -0.75, 0);
+          beamAt(hx, 0.65, hz, Math.PI / 2, 0, 0.8);
           b.colliders.push(new THREE.Box3(new V3(hx - 0.6, 0, hz - 0.6), new V3(hx + 0.6, 1.2, hz + 0.6)));
         }
       }
+      b.deco(mergeGeometries(beams), 'steel', 0, 0, 0);
       // Wrecked landing craft: cover on the open sand.
-      for (let i = 0; i < 9; i++) {
+      for (let i = 0; i < 15; i++) {
         const cx = -82 + r() * 26, cz = (r() * 2 - 1) * (H - 20);
         b.box(cx, 0, cz, 7.5, 1.5, 0.3, 'hull'); b.box(cx, 0, cz + 3.1, 7.5, 1.5, 0.3, 'hull');
         b.box(cx + 3.6, 0, cz + 1.55, 0.3, 1.5, 2.8, 'hull');
@@ -835,14 +842,14 @@ const MAPS = {
         b.box(x + D / 4, Hh, z, D / 2 + 0.6, 0.45, W + 0.4, 'concrete');
         b.box(x - D / 2 - 1, 0, z, 0.9, 0.9, W + 3, 'sandbag');
       };
-      for (const z of [-110, -40, 20, 80, 135]) bunker(-28, z);
+      for (const z of [-205, -160, -120, -78, -38, 20, 60, 100, 145, 195]) bunker(-28, z);
       // Trench lines behind the bunkers.
       for (let z = -H + 10; z < H - 10; z += 20) {
         if (r() < 0.2) continue;
         b.box(-14, 0, z, 0.9, 1.05, 12 + r() * 4, 'sandbag');
       }
-      for (const z of [-75, -5, 50, 110]) { b.box(-20, 0, z, 3, 1, 0.9, 'sandbag'); b.box(-21.5, 0, z + 1.4, 0.9, 1, 3.6, 'sandbag'); }
-      // Village around flag B.
+      for (const z of [-185, -140, -100, -58, -5, 40, 80, 122, 170]) { b.box(-20, 0, z, 3, 1, 0.9, 'sandbag'); b.box(-21.5, 0, z + 1.4, 0.9, 1, 3.6, 'sandbag'); }
+      // Village around flag C.
       const town = [[10, -18, 9, 8, 5.5, 'se', 'plaster'], [24, -22, 8, 7, 4.5, 'nw', 'brick'], [40, -16, 10, 9, 6, 'sw', 'plaster'],
         [8, 30, 10, 8, 5, 'ne', 'brick'], [26, 32, 9, 9, 4.5, 'nw', 'plaster'], [44, 30, 8, 10, 5.5, 'sw', 'brick'],
         [52, 8, 8, 8, 4.5, 'wn', 'plaster'], [2, 6, 7, 8, 4.5, 'es', 'plaster']];
@@ -858,23 +865,56 @@ const MAPS = {
       b.box(25, 0, 10, 4, 0.7, 4, 'concrete'); b.box(25, 0.7, 10, 1, 1.3, 1, 'concrete');
       for (const [x, z] of [[17, 4], [33, 16], [19, 18], [32, 2]]) b.box(x, 0, z, 2.6, 1, 0.9, 'sandbag');
       b.crate(14, 14, 1.2, 2); b.crate(36, 6, 1.2); b.barrel(30, 20, 0x4a5a3a); b.barrel(30.7, 20.4, 0x4a5a3a);
+      // A hamlet on the southern flank.
+      for (const [x, z, w, d, h, doors, m] of [[12, -138, 9, 8, 5, 'ne', 'plaster'], [30, -146, 8, 7, 4.5, 'nw', 'brick'],
+        [47, -136, 9, 9, 5, 'sw', 'plaster'], [18, -166, 8, 8, 4.5, 'en', 'brick'], [40, -168, 10, 8, 5.5, 'ws', 'plaster']]) {
+        b.building(x, z, w, d, h, doors.split(''), m, 'roof');
+      }
+      b.box(30, 0, -156, 2.6, 1, 0.9, 'sandbag'); b.crate(24, -152, 1.2, 2); b.barrel(36, -155, 0x4a5a3a);
+      // A walled manor on the northern flank.
+      b.building(52, 172, 16, 12, 8, ['s', 'w'], 'brick', 'roof');
+      b.box(42, 0, 150, 16, 1.3, 0.6, 'brick'); b.box(64, 0, 150, 20, 1.3, 0.6, 'brick');
+      b.box(34, 0, 160, 0.6, 1.3, 20, 'brick'); b.box(34, 0, 185, 0.6, 1.3, 18, 'brick');
+      b.box(74, 0, 160, 0.6, 1.3, 20, 'brick'); b.box(74, 0, 186, 0.6, 1.3, 16, 'brick');
+      b.box(54, 0, 194, 40, 1.3, 0.6, 'brick');
+      b.crate(40, 158, 1.2, 2); b.crate(66, 186, 1.2);
       // Hedgerow fields inland.
-      for (let x = 70; x <= 150; x += 26) {
+      for (let x = 70; x <= 226; x += 26) {
         for (let z = -H + 6; z < H - 6; z += 30) {
           if (r() < 0.3) continue;
-          b.box(x, 0, z + 9, 2, 2.4, 16 + r() * 6, 'hedge');
+          const len = 16 + r() * 6;
+          if (open(x - 1, z + 9 - len / 2, x + 1, z + 9 + len / 2)) b.box(x, 0, z + 9, 2, 2.4, len, 'hedge');
         }
       }
-      for (let z = -120; z <= 140; z += 52) for (let x = 75; x <= 145; x += 28) if (r() < 0.6) b.box(x + 13, 0, z, 18, 2.4, 2, 'hedge');
-      // Farm at flag C.
-      b.building(98, 62, 14, 10, 6, ['w', 's'], 'wood', 'roof');
-      b.building(72, 66, 9, 8, 5, ['e', 's'], 'brick', 'roof');
-      for (const [x, z] of [[80, 44], [92, 40], [86, 56]]) b.crate(x, z, 1.3, 1 + Math.floor(r() * 2));
-      b.box(86, 0, 34, 6, 1.2, 0.5, 'wood');
-      // Rear Axis trenches.
-      for (let z = -130; z <= 130; z += 26) b.box(140, 0, z, 0.9, 1.1, 14, 'sandbag');
+      for (let z = -H + 30; z <= H - 30; z += 52) {
+        for (let x = 75; x <= 215; x += 28) if (r() < 0.6 && open(x + 4, z - 1, x + 22, z + 1)) b.box(x + 13, 0, z, 18, 2.4, 2, 'hedge');
+      }
+      // Farm at flag D.
+      b.building(126, 122, 14, 10, 6, ['w', 's'], 'wood', 'roof');
+      b.building(98, 126, 9, 8, 5, ['e', 's'], 'brick', 'roof');
+      for (const [x, z] of [[102, 98], [116, 96], [108, 104]]) b.crate(x, z, 1.3, 1 + Math.floor(r() * 2));
+      b.box(112, 0, 90, 6, 1.2, 0.5, 'wood');
+      // Coastal gun battery at flag E: open gun pits facing the sea, a command post behind them.
+      const barrel = new THREE.CylinderGeometry(0.2, 0.32, 7, 10).rotateZ(Math.PI / 2);
+      const gunPit = (x, z) => {
+        b.box(x + 4, 0, z, 0.8, 1.6, 10.6, 'concrete');
+        b.box(x, 0, z - 5, 8, 1.6, 0.8, 'concrete'); b.box(x, 0, z + 5, 8, 1.6, 0.8, 'concrete');
+        b.box(x - 4.4, 0, z, 0.9, 0.9, 5, 'sandbag');
+        b.box(x, 0, z, 2.6, 1.2, 2.2, 'steel');
+        b.box(x - 1, 1.2, z, 0.3, 1.5, 2.8, 'steel');
+        b.deco(barrel, 'steel', x - 4.5, 1.85, z);
+      };
+      for (const z of [-126, -90, -54]) gunPit(136, z);
+      b.building(166, -90, 10, 8, 3.2, ['w', 'e'], 'concrete', 'concrete');
+      b.box(150, 0, -100, 4, 1, 0.9, 'sandbag'); b.box(147, 0, -82, 3.5, 1, 0.9, 'sandbag');
+      b.crate(153, -95, 1.2, 2); b.crate(158, -104, 1.2, 2); b.crate(158, -76, 1.2);
+      // Rear Axis lines: trenches and the camp the Axis infantry start from.
+      for (let z = -210; z <= 210; z += 26) b.box(212, 0, z, 0.9, 1.1, 14, 'sandbag');
+      b.building(222, -30, 12, 7, 3.5, ['w'], 'wood', 'roof');
+      b.building(222, 40, 12, 7, 3.5, ['w'], 'wood', 'roof');
+      for (const [x, z] of [[206, 5], [208, 12], [216, -50], [216, 72]]) b.crate(x, z, 1.2, 1 + Math.floor(r() * 2));
       // Allied fleet on the horizon.
-      for (const [x, z, l] of [[-240, -120, 70], [-260, -20, 90], [-235, 70, 60], [-275, 150, 80], [-250, 210, 55]]) {
+      for (const [x, z, l] of [[-300, -260, 70], [-330, -150, 90], [-290, -40, 60], [-345, 60, 80], [-305, 170, 70], [-335, 280, 55]]) {
         b.box(x, 0, z, 14, 6, l, 'hull', { collide: false, ray: false });
         b.box(x, 6, z + l * 0.1, 8, 7, l * 0.25, 'hull', { collide: false, ray: false });
         b.box(x, 13, z + l * 0.1, 1.2, 9, 1.2, 'hull', { collide: false, ray: false });
@@ -884,6 +924,8 @@ const MAPS = {
 };
 
 let mapGroup = null, colliders = [], mapMeshes = [], spawns = [], navPts = [], currentMap = null, mapHalf = 44, radarImg = null;
+const sunOffset = new V3(), _sunLook = new V3();
+let shadowFollow = false;
 
 // Colliders bucketed into a 12 m grid, so collision and sight checks only look at nearby walls.
 const GRID = 12;
@@ -921,7 +963,7 @@ function clearArea(x, z, r) {
 }
 function computeSpawns(half) {
   const r = mulberry32(99), pts = [];
-  const want = half > 80 ? 900 : 250;
+  const want = half > 200 ? 1800 : half > 80 ? 900 : 250;
   for (let i = 0; i < want * 6 && pts.length < want; i++) {
     const x = (r() * 2 - 1) * (half - 3), z = (r() * 2 - 1) * (half - 3);
     if (clearArea(x, z, 1.2)) pts.push(new V3(x, 0, z));
@@ -938,7 +980,7 @@ function computeSpawns(half) {
   return out;
 }
 function buildRadarImage(half) {
-  const c = document.createElement('canvas'), S = 512, k = S / (2 * half);
+  const c = document.createElement('canvas'), S = half > 100 ? 1024 : 512, k = S / (2 * half);
   c.width = c.height = S;
   const g = c.getContext('2d');
   g.fillStyle = 'rgba(30,42,34,0.9)'; g.fillRect(0, 0, S, S);
@@ -969,8 +1011,12 @@ function loadMap(id) {
   sky.material.uniforms.bottom.value.set(e.sky[1]);
   scene.fog = new THREE.Fog(e.fog[0], e.fog[1], e.fog[2]);
   sun.color.set(e.sun[0]); sun.intensity = e.sun[1]; sun.position.set(...e.sun[2]);
-  const sc = sun.shadow.camera, ext = def.half + 8;
-  sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.near = 1; sc.far = 250;
+  // Big maps get a shadow box that follows the camera (the sun sits further out so planes
+  // cast shadows too), which keeps shadows as sharp as on the small maps.
+  shadowFollow = def.half > 100;
+  sunOffset.set(...e.sun[2]).multiplyScalar(shadowFollow ? 2 : 1);
+  const sc = sun.shadow.camera, ext = shadowFollow ? 150 : def.half + 8;
+  sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.near = 1; sc.far = shadowFollow ? 520 : 250;
   sc.updateProjectionMatrix();
   hemi.color.set(e.hemi[0]); hemi.groundColor.set(e.hemi[1]); hemi.intensity = e.hemi[2];
   renderer.toneMappingExposure = e.exposure;
@@ -1863,7 +1909,7 @@ function aliveHitboxes() {
   const arr = [];
   for (const rp of remotes.values()) {
     if (!rp.alive || !rp.has || !rp.group.visible || !isEnemy(rp.id)) continue;
-    if (rp.form === FORM.plane && rp.plane) arr.push(rp.plane.userData.body); else arr.push(...rp.hitboxes);
+    if (rp.form === FORM.plane && rp.plane) arr.push(rp.plane.userData.hit); else arr.push(...rp.hitboxes);
   }
   return arr;
 }
@@ -2025,7 +2071,8 @@ function clearGrenades() {
 
 // Roles: 'inf' (Allies land by boat, Axis hold the trenches), 'para' (parachute in) and 'jet' (fighter pilot).
 const ROLE_NAMES = { inf: 'INFANTRY', para: 'PARATROOPER', jet: 'FIGHTER PILOT' };
-const PLANE = { speed: 55, min: 36, max: 80, turn: 1.3, ceiling: 170, gunDmg: 16, gunRpm: 900, bombMs: 1600 };
+// Planes are fragile: every hit on one does hitMul times the damage, so a couple of rifle hits bring one down.
+const PLANE = { speed: 55, min: 36, max: 80, turn: 1.3, ceiling: 170, gunDmg: 16, gunRpm: 900, bombMs: 1600, hitMul: 3 };
 const BOMB = { radius: 10, maxDmg: 220 };
 const CHUTE = { y: 110, fall: 6, steer: 4.5 };
 const BOAT = { startX: -158, landX: -90, speed: 11 };
@@ -2039,10 +2086,14 @@ const fwdOf = (yaw, pitch = 0) => new V3(-Math.sin(yaw) * Math.cos(pitch), Math.
 // Allied infantry in landing craft at sea, Axis infantry in the rear trenches and fields.
 function ddaySpawn(role, team, enemies) {
   const toward = team === 0 ? -Math.PI / 2 : Math.PI / 2;
-  if (role === 'jet') return { pos: new V3(team === 0 ? -185 : 185, rand(75, 115), rand(-120, 120)), yaw: toward, form: FORM.plane };
-  if (role === 'para') return { pos: new V3(team === 0 ? rand(-25, 110) : rand(-75, 60), CHUTE.y + rand(-12, 12), rand(-130, 130)), yaw: toward, form: FORM.chute };
-  if (team === 0) return { pos: new V3(BOAT.startX - rand(0, 25), 0.35, rand(-135, 135)), yaw: toward, form: FORM.boat };
-  const rear = navPts.filter((p) => p.x > 100), pool = rear.length ? rear : navPts;
+  if (role === 'jet') return { pos: new V3(team === 0 ? -(mapHalf + 25) : mapHalf + 25, rand(75, 115), rand(-200, 200)), yaw: toward, form: FORM.plane };
+  if (role === 'para') {
+    // Paratroopers drop around a random flag.
+    const flags = MAPS.normandy.zones.dom, [fx, fz] = flags[Math.floor(Math.random() * flags.length)];
+    return { pos: new V3(Math.max(-60, fx + rand(-45, 45)), CHUTE.y + rand(-12, 12), fz + rand(-45, 45)), yaw: toward, form: FORM.chute };
+  }
+  if (team === 0) return { pos: new V3(BOAT.startX - rand(0, 25), 0.35, rand(-190, 190)), yaw: toward, form: FORM.boat };
+  const rear = navPts.filter((p) => p.x > mapHalf - 55 && Math.abs(p.z) < 170), pool = rear.length ? rear : navPts;
   let best = pool[0], bd = -1;
   for (let i = 0; i < 8; i++) {
     const p = pool[Math.floor(Math.random() * pool.length)];
@@ -2127,10 +2178,15 @@ function makePlane(team) {
   body.castShadow = true;
   const prop = new THREE.Mesh(G.prop, vcMat);
   prop.position.z = -3.95;
-  g.add(body, prop);
-  g.userData.body = body; g.userData.prop = prop;
+  // An invisible box a bit bigger than the plane takes the bullets, so near misses still count.
+  const hit = new THREE.Mesh(planeHitGeo, planeHitMat);
+  hit.visible = false;
+  g.add(body, prop, hit);
+  g.userData.body = body; g.userData.prop = prop; g.userData.hit = hit;
   return g;
 }
+const planeHitGeo = new THREE.BoxGeometry(14, 4, 10);
+const planeHitMat = new THREE.MeshBasicMaterial();
 const chuteGeo = new THREE.SphereGeometry(3.2, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2.4).scale(1, 0.55, 1);
 const chuteMats = [0xd9d4c4, 0x8a8a70].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9, side: THREE.DoubleSide }));
 const chuteLines = new THREE.BufferGeometry().setFromPoints([[2.2, 2.2], [-2.2, 2.2], [2.2, -2.2], [-2.2, -2.2]]
@@ -2168,7 +2224,7 @@ function setForm(rp, form) {
   const team = teamOf(rp.id) === 1 ? 1 : 0;
   if (form === FORM.plane && !rp.plane) {
     rp.plane = makePlane(team);
-    rp.plane.userData.body.userData = { pid: rp.id, part: 'body', plane: true };
+    rp.plane.userData.hit.userData = { pid: rp.id, part: 'body', plane: true };
     rp.group.add(rp.plane);
   }
   if (form === FORM.chute && !rp.chute) { rp.chute = makeChute(team); rp.group.add(rp.chute); }
@@ -2265,7 +2321,7 @@ function planeGuns(now) {
     const h = hits[0], ud = h.object.userData;
     end = h.point;
     if (ud.pid) {
-      net.send({ t: 'hit', target: ud.pid, dmg: PLANE.gunDmg, head: false, w: 'mg' });
+      net.send({ t: 'hit', target: ud.pid, dmg: PLANE.gunDmg * (ud.plane ? PLANE.hitMul : 1), head: false, w: 'mg' });
       showHitmarker(false); sfx.hit();
       emit(h.point, dir.clone().negate(), ud.plane ? 'metal' : 'blood', 6);
     } else emit(h.point, h.face ? h.face.normal.clone() : dir.clone().negate(), ud.surf, 6);
@@ -2383,7 +2439,7 @@ function buildObjectives() {
   objGroup = new THREE.Group();
   scene.add(objGroup);
   const z = MAPS[currentMap].zones;
-  if (isDom(match.mode)) objMarks = z.dom.map(([x, zz], i) => { const m = makeMark('ABC'[i], domR(match.mode), true); m.g.position.set(x, 0, zz); return m; });
+  if (isDom(match.mode)) objMarks = z.dom.map(([x, zz], i) => { const m = makeMark('ABCDE'[i], domR(match.mode), true); m.g.position.set(x, 0, zz); return m; });
   else objMarks = [makeMark('HP', HP_R, false)];
 }
 // Zone currently being scored in Hardpoint.
@@ -2645,11 +2701,11 @@ function fire(now) {
     if (ud.pid) {
       let dmg = d.dmg * (h.distance > d.range ? 0.72 : 1);
       if (ud.part === 'head') dmg *= d.head; else if (ud.part === 'leg') dmg *= 0.85;
-      if (ud.plane) dmg *= 0.6;
+      if (ud.plane) dmg *= PLANE.hitMul;
       net.send({ t: 'hit', target: ud.pid, dmg: Math.round(dmg), head: ud.part === 'head', w: w.id });
       showHitmarker(false);
       if (ud.part === 'head') sfx.head(); else sfx.hit();
-      emit(h.point, back, 'blood', 10);
+      emit(h.point, back, ud.plane ? 'metal' : 'blood', 10);
     } else {
       const n = h.face ? h.face.normal.clone() : back;
       addDecal(h.point, n);
@@ -2957,9 +3013,9 @@ function onMsg(m) {
     case 'cap':
       if (match) {
         const mine = m.team === myTeam();
-        addFeedText(`${teamName(m.team)} captured ${'ABC'[m.i]}`);
+        addFeedText(`${teamName(m.team)} captured ${'ABCDE'[m.i]}`);
         sfx.capture(mine);
-        notify(`${mine ? 'CAPTURED' : 'LOST'} ${'ABC'[m.i]}`, mine ? '+FLAG' : '');
+        notify(`${mine ? 'CAPTURED' : 'LOST'} ${'ABCDE'[m.i]}`, mine ? '+FLAG' : '');
       }
       break;
     case 'hpmove':
@@ -3026,7 +3082,7 @@ function segmentClear(a, b) {
 
 let offline = null;
 
-const MODE_LIMITS = { ffa: 30, dom: 200, hp: 150, inf: 0, dday: 300 };
+const MODE_LIMITS = { ffa: 30, dom: 200, hp: 150, inf: 0, dday: 500 };
 
 class LocalMatch {
   constructor(cfg) {
@@ -3278,7 +3334,7 @@ class LocalMatch {
     const T = f.tgt, dog = T && T.ent.form === FORM.plane;
     let tx, ty, tz;
     if (T) { tx = T.pos.x; tz = T.pos.z; ty = dog ? T.pos.y : 60; }
-    else { const zz = MAPS[this.cfg.map].zones.dom[Math.floor(now / 9000 + b.id) % 3]; tx = zz[0]; tz = zz[1]; ty = 85; }
+    else { const dom = MAPS[this.cfg.map].zones.dom, zz = dom[Math.floor(now / 9000 + b.id) % dom.length]; tx = zz[0]; tz = zz[1]; ty = 85; }
     const edge = mapHalf + 30;
     if (Math.abs(b.pos.x) > edge || Math.abs(b.pos.z) > edge) { tx = 0; tz = 0; }
     const dx = tx - b.pos.x, dz = tz - b.pos.z, horiz = Math.hypot(dx, dz) || 1;
@@ -3311,7 +3367,7 @@ class LocalMatch {
         const hit = Math.random() < d.acc * 0.55 * clamp(1 - dist / 260, 0.2, 1);
         const end = T.pos.clone().add(hit ? new V3() : new V3(rand(-4, 4), rand(-3, 3), rand(-4, 4)));
         this.send({ t: 'shot', id: b.id, f: [b.pos.x + fwd.x * 3, b.pos.y + fwd.y * 3, b.pos.z + fwd.z * 3], e: [end.x, end.y, end.z], w: 'mg' });
-        if (hit) this.applyHit(b, T.ent, PLANE.gunDmg, false, 'mg');
+        if (hit) this.applyHit(b, T.ent, PLANE.gunDmg * PLANE.hitMul, false, 'mg');
       }
     }
   }
@@ -3447,7 +3503,7 @@ class LocalMatch {
       for (const t of this.targets(b)) {
         const plane = t.ent.form === FORM.plane;
         const dx = t.pos.x - eye.x, dy = t.pos.y + 1.2 - eye.y, dz = t.pos.z - eye.z, d2 = dx * dx + dy * dy + dz * dz;
-        if (d2 < (plane ? 90 * 90 : 75 * 75)) cands.push({ t, d2, plane });
+        if (d2 < (plane ? 130 * 130 : 75 * 75)) cands.push({ t, d2, plane });
       }
       cands.sort((a, c) => (a.plane - c.plane) || (a.d2 - c.d2));
       let best = null, bd = Infinity, checks = 0;
@@ -3562,7 +3618,7 @@ class LocalMatch {
     const falloff = clamp(1 - dist / (w.range > 100 ? 140 : w.range * 2.5), 0.15, 1);
     const moving = isMe ? Math.hypot(P.vel.x, P.vel.z) > 1 : Math.hypot(T.ent.vel.x, T.ent.vel.z) > 1;
     const atPlane = T.ent.form === FORM.plane;
-    let chance = d.acc * falloff * (moving ? 0.75 : 1) * (crouch ? 0.85 : 1) * (w.scope ? 0.7 : 1) * (atPlane ? 0.35 : 1);
+    let chance = d.acc * falloff * (moving ? 0.75 : 1) * (crouch ? 0.85 : 1) * (w.scope ? 0.7 : 1) * (atPlane ? 0.7 : 1);
     if (isMe && P.slideT > 0) chance *= 0.6;
     const hit = Math.random() < chance, head = hit && Math.random() < d.head;
     const end = tp.clone();
@@ -3570,7 +3626,7 @@ class LocalMatch {
     const fx = -Math.sin(b.yaw), fz = -Math.cos(b.yaw);
     const muzzle = [b.pos.x + fx * 0.95 + Math.cos(b.yaw) * 0.1, b.pos.y + 1.45, b.pos.z + fz * 0.95 - Math.sin(b.yaw) * 0.1];
     this.send({ t: 'shot', id: b.id, f: muzzle, e: [end.x, end.y, end.z], w: b.wid });
-    if (hit) this.applyHit(b, T.ent, w.dmg * (head && !atPlane ? w.head : 1) * (dist > w.range ? 0.72 : 1) * (atPlane ? 0.6 : 1), head && !atPlane, b.wid);
+    if (hit) this.applyHit(b, T.ent, w.dmg * (head && !atPlane ? w.head : 1) * (dist > w.range ? 0.72 : 1) * (atPlane ? PLANE.hitMul : 1), head && !atPlane, b.wid);
   }
 }
 
@@ -4058,13 +4114,13 @@ function renderObjBar(now) {
       const [owner, cap, prog, contested] = flags[i] || [-1, -1, 0, false];
       const here = inZone(x, z, domR(match.mode));
       const bar = prog > 0 ? `<i style="width:${Math.round(prog * 100)}%;background:${relColor(cap)}"></i>` : '';
-      return `<span class="flag${here ? ' here' : ''}${contested ? ' contested' : ''}" style="border-color:${relColor(owner)};color:${relColor(owner)}">${bar}<b>${'ABC'[i]}</b></span>`;
+      return `<span class="flag${here ? ' here' : ''}${contested ? ' contested' : ''}" style="border-color:${relColor(owner)};color:${relColor(owner)}">${bar}<b>${'ABCDE'[i]}</b></span>`;
     }).join('');
     const here = MAPS[currentMap].zones.dom.findIndex(([x, z]) => inZone(x, z, domR(match.mode)));
     if (here >= 0) {
       const [owner, , , contested] = flags[here] || [];
       const msg = contested ? 'CONTESTED' : owner === myTeam() ? 'DEFENDING' : 'CAPTURING';
-      html += `<div class="objmsg">${msg} ${'ABC'[here]}</div>`;
+      html += `<div class="objmsg">${msg} ${'ABCDE'[here]}</div>`;
     }
   } else if (match.mode === 'hp') {
     const [idx, until, holder] = match.obj?.hp || [0, match.startAt + HP_ROTATE_MS, -1];
@@ -4403,7 +4459,13 @@ function frame(now) {
   updateParticles(dt);
   updateTracers(dt);
   sky.position.copy(camera.position);
-  sun.target.position.set(0, 0, 0);
+  if (shadowFollow) {
+    // Centred a little ahead of the view, snapped to a coarse grid so shadows don't crawl as you move.
+    const look = camera.getWorldDirection(_sunLook).setY(0).normalize().multiplyScalar(60).add(camera.position);
+    const sx = Math.round(look.x / 8) * 8, sz = Math.round(look.z / 8) * 8;
+    sun.target.position.set(sx, 0, sz);
+    sun.position.set(sx + sunOffset.x, sunOffset.y, sz + sunOffset.z);
+  } else sun.target.position.set(0, 0, 0);
   renderer.clear();
   renderer.render(scene, camera);
   if (ui === 'hud' && P.alive && vmRoot.visible) {
@@ -4413,6 +4475,3 @@ function frame(now) {
 }
 loadMap('harbor');
 requestAnimationFrame(frame);
-
-
-
