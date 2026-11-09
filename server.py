@@ -27,9 +27,10 @@ CHARS = ["bulwark", "viper", "wraith", "hawk"]
 TEAM_MODES = ("dom", "hp", "inf", "dday")
 MAX_PLAYERS = 12
 SCORE_LIMIT = {"ffa": 30, "dom": 200, "hp": 150, "inf": 0, "dday": 300}
-# D-Day: 200 soldiers, 100 a side. Per side: landing infantry, paratroopers, fighter pilots.
-DDAY_ROLES = ({"inf": 50, "para": 25, "jet": 25}, {"inf": 50, "para": 25, "jet": 25})
+# D-Day: 100 soldiers, 50 a side. Per side: landing infantry, paratroopers, fighter pilots.
+DDAY_ROLES = ({"inf": 20, "para": 15, "jet": 15}, {"inf": 20, "para": 15, "jet": 15})
 DDAY_TIME_MS = 15 * 60 * 1000
+ROLE_CHOICES = ("random", "inf", "para", "jet")
 BOT_NAMES = ["Miller", "Baker", "Carter", "Hayes", "Ward", "Brooks", "Reed", "Price", "Kelly", "Foster",
              "Wagner", "Becker", "Hoffmann", "Krause", "Vogel", "Lang", "Brandt", "Keller", "Roth", "Frank"]
 NUKE_KILLS = 20
@@ -162,6 +163,7 @@ class Player:
         self.char = "bulwark"
         self.team = -1
         self.role = ""
+        self.pref_role = "random"
         self.bot = False
         self.reset()
 
@@ -329,10 +331,12 @@ def begin_match(room):
 def fill_dday(room):
     """Give each human a random role, then fill every empty slot with a bot."""
     quota = [dict(q) for q in DDAY_ROLES]
-    for p in room.players.values():
+    people = list(room.players.values())
+    random.shuffle(people)
+    for p in sorted(people, key=lambda x: x.pref_role == "random"):
         q = quota[p.team]
         open_roles = [r for r, n in q.items() if n > 0] or ["inf"]
-        p.role = random.choice(open_roles)
+        p.role = p.pref_role if q.get(p.pref_role, 0) > 0 else random.choice(open_roles)
         q[p.role] = max(0, q.get(p.role, 0) - 1)
     for team in (0, 1):
         for role, n in quota[team].items():
@@ -430,7 +434,8 @@ def on_loaded(room, p):
             team = 0 if sizes[0] <= sizes[1] else 1
             bots = [x for x in room.players.values() if x.bot and x.team == team]
             p.team = team
-            p.role = random.choice(bots).role if bots else random.choice(["inf", "para", "jet"])
+            wanted = [x for x in bots if x.role == p.pref_role]
+            p.role = random.choice(wanted or bots).role if bots else random.choice(["inf", "para", "jet"])
             same = [x for x in bots if x.role == p.role]
             if same:
                 room.players.pop(same[0].id)
@@ -488,6 +493,8 @@ def handle(p, m):
             p.loadout = m["loadout"]
         if m.get("char") in CHARS:
             p.char = m["char"]
+        if m.get("role") in ROLE_CHOICES:
+            p.pref_role = m["role"]
         room = Room(make_code(), p)
         rooms[room.code] = room
         return join_room(p, room)
@@ -504,6 +511,8 @@ def handle(p, m):
             p.loadout = m["loadout"]
         if m.get("char") in CHARS:
             p.char = m["char"]
+        if m.get("role") in ROLE_CHOICES:
+            p.pref_role = m["role"]
         return join_room(p, room)
 
     room = p.room
@@ -561,6 +570,8 @@ def handle(p, m):
             room.nuke_at = now_ms() + NUKE_DELAY_MS
             room.nuke_by = p.id
             broadcast(room, {"t": "nuke", "by": p.id, "at": room.nuke_at})
+    elif t == "setRole":
+        set_role(room, p, m.get("role"))
     elif t == "crash":
         if room.state == "playing" and p.alive:
             kill_self(room, p, "crash")
@@ -572,6 +583,23 @@ def handle(p, m):
             p.hp = 100
             p.pos = None
             broadcast(room, {"t": "spawned", "id": p.id, "team": p.team})
+
+
+def set_role(room, p, role):
+    """Before a match this is a preference. In D-Day it trades roles with a bot on your
+    team, so each side keeps its 50/25/25 split; the new role starts on your next spawn."""
+    if role not in ROLE_CHOICES:
+        return
+    p.pref_role = role
+    if room.state != "playing" or room.mode != "dday" or role == "random" or role == p.role:
+        return
+    bots = [x for x in room.players.values() if x.bot and x.team == p.team and x.role == role]
+    if not bots:
+        return send(p, {"t": "roleFull", "role": role})
+    b = random.choice(sorted(bots, key=lambda x: x.alive)[:max(1, len(bots) // 2)])
+    b.role, p.role = p.role, role
+    broadcast(room, {"t": "role", "id": p.id, "role": p.role})
+    broadcast(room, {"t": "role", "id": b.id, "role": b.role})
 
 
 def handle_bots(room, p, t, m):

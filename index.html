@@ -94,6 +94,10 @@
       <div id="respawnIn"></div>
       <div class="muted">Press 1–4 to change loadout for your next life • SPACE to deploy</div>
       <div id="deathLoadouts" class="cards mini"></div>
+      <div id="deathRoleWrap" class="hidden">
+        <div class="muted">Press 7–9 to switch role (you trade places with a bot on your side)</div>
+        <div id="deathRoles" class="cards mini"></div>
+      </div>
     </div>
 
     <div id="scoreboard" class="hidden">
@@ -108,6 +112,7 @@
         <h3>LOADOUT</h3>
         <div id="pauseLoadouts" class="cards mini"></div>
         <div id="pauseLoNote" class="muted"></div>
+        <div id="pauseRoleWrap" class="hidden"><h3>D-DAY ROLE <span class="muted">(next spawn)</span></h3><div id="pauseRoles" class="cards mini"></div></div>
         <h3>OPERATOR</h3>
         <div id="pauseChars" class="cards chars mini"></div>
         <h3>SETTINGS</h3>
@@ -161,6 +166,7 @@
         <div id="modes" class="cards"></div>
         <h3>MAP <span id="mapHint" class="muted"></span></h3>
         <div id="maps" class="cards"></div>
+        <div id="roleWrap" class="hidden"><h3>D-DAY ROLE</h3><div id="roles" class="cards"></div></div>
         <h3>OPERATOR</h3>
         <div id="chars" class="cards chars"></div>
         <h3>LOADOUT</h3>
@@ -185,6 +191,7 @@
           <div><h3>BOTS</h3><div id="offBots" class="seg"></div></div>
           <div><h3>DIFFICULTY</h3><div id="offDiff" class="seg"></div></div>
         </div>
+        <div id="offRoleWrap" class="hidden"><h3>D-DAY ROLE</h3><div id="offRoles" class="cards"></div></div>
         <h3>OPERATOR</h3>
         <div id="offChars" class="cards chars"></div>
         <h3>LOADOUT</h3>
