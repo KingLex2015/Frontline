@@ -216,3 +216,12 @@ tr.me td { color: var(--accent); background: rgba(240,166,58,0.08); }
 
 /* ---------- D-Day ---------- */
 #flighthud { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); padding: 6px 16px; background: rgba(0,0,0,0.5); font-size: 18px; font-weight: 700; letter-spacing: 2px; color: var(--text); white-space: nowrap; }
+/* The jump light by a troop carrier's door: red READY, then green JUMP. */
+#jumplight { position: absolute; left: 50%; top: 16%; transform: translateX(-50%); text-align: center; font-weight: 700; letter-spacing: 3px; text-shadow: 0 2px 8px #000; white-space: nowrap; }
+#jumplight .lamp { width: 26px; height: 26px; margin: 0 auto 8px; border-radius: 50%; background: #333; border: 3px solid #111; }
+#jumplight.red .lamp { background: #ff2a1a; box-shadow: 0 0 24px 6px rgba(255,42,26,0.7); }
+#jumplight.green .lamp { background: #2aff4a; box-shadow: 0 0 24px 6px rgba(42,255,74,0.7); }
+#jlText { font-size: 30px; color: var(--text); }
+#jumplight.red #jlText { font-size: 64px; color: #ff4a3a; }
+#jumplight.green #jlText { font-size: 72px; color: #4aff6a; }
+#jlSub { font-size: 18px; color: var(--text); opacity: 0.9; }

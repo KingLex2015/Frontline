@@ -1874,6 +1874,7 @@ function updateRemotes(dt, now) {
     rp.group.rotation.y = rp.yaw;
     if (dday) {
       setForm(rp, rp.formWant ?? FORM.ground);
+      if (rp.form === FORM.ride) { rp.group.visible = false; continue; }
       const dist = rp.group.position.distanceTo(camera.position);
       rp.group.visible = dist < (rp.form === FORM.plane ? 480 : 200);
       if (rp.form === FORM.plane) {
@@ -2076,21 +2077,62 @@ const PLANE = { speed: 55, min: 36, max: 80, turn: 1.3, ceiling: 170, gunDmg: 16
 const BOMB = { radius: 10, maxDmg: 220 };
 const CHUTE = { y: 110, fall: 6, steer: 4.5 };
 const BOAT = { startX: -158, landX: -90, speed: 11 };
-const FORM = { ground: 0, chute: 1, plane: 2, boat: 3 }; // what a soldier currently is, sent as `r` in state
+const FORM = { ground: 0, chute: 1, plane: 2, boat: 3, ride: 4 }; // what a soldier currently is, sent as `r` in state; ride = in a troop carrier
 const KILL_NAMES = { frag: 'FRAG', bomb: 'BOMB', mg: 'PLANE GUNS', crash: 'CRASHED' };
 const isDday = () => match?.mode === 'dday';
 const roleOf = (id) => pInfo(id)?.role || 'inf';
 const fwdOf = (yaw, pitch = 0) => new V3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
 
-// Where each role enters: pilots from their side's sky, paratroopers over the middle,
+// Fighter flights, after the WWII pattern: the finger-four (the German Schwarm, two pairs spaced like the
+// fingertips of a hand), a Vic of three when a flight is a plane short, and a lone pair (Rotte) below that.
+// Slots are [right, back, up] from the leader in metres; real spacing was about 200 m, squeezed here to fit the map.
+const FLIGHT_SLOTS = {
+  1: [[0, 0, 0]],
+  2: [[0, 0, 0], [-20, 12, -2]],
+  3: [[0, 0, 0], [-20, 14, 0], [20, 14, 0]],
+  4: [[0, 0, 0], [-20, 12, -2], [20, 12, 2], [40, 24, 4]],
+};
+// Troop carriers (Allied C-47s, Axis Ju 52s) cross the map in Vics of three at jump height and speed, about
+// 110 mph as on D-Day. Each side sends a Vic every runMs. The light by the door goes red (READY) redMs before
+// the drop zone and green (JUMP) over it. It is all worked out from the match clock, so every player sees the
+// same planes without any of it going over the network.
+const TRANSPORT = { speed: 49, y: CHUTE.y + 2, runMs: 6000, redMs: 3500, greenMs: 2200, wing: 26, back: 20, reach: 760 };
+function transportRun(team, k) {
+  const flags = MAPS.normandy.zones.dom, flag = (((k * 3 + team * 2) % flags.length) + flags.length) % flags.length, [fx, fz] = flags[flag];
+  const dir = team === 0 ? 1 : -1;
+  const half = TRANSPORT.speed * TRANSPORT.greenMs / 2000; // the green light is on for this far either side of the flag
+  return { dir, flag, z: fz, greenX: dir > 0 ? Math.max(fx - half, -70) : fx + half, greenAt: k * TRANSPORT.runMs + (team ? TRANSPORT.runMs / 2 : 0) };
+}
+// Plane `slot` of a run (0 lead, 1 left wing, 2 right wing; wingmen fly behind) at match time tau (ms).
+// Returns how long since that plane's light went green, negative before.
+function transportPose(team, k, slot, tau, out) {
+  const r = transportRun(team, k), ph = tau - r.greenAt - (slot ? TRANSPORT.back / TRANSPORT.speed * 1000 : 0);
+  const side = slot === 1 ? -1 : slot === 2 ? 1 : 0;
+  out.set(r.greenX + r.dir * ph / 1000 * TRANSPORT.speed, TRANSPORT.y + (slot ? 3 : 0) + Math.sin(tau / 1300 + k * 1.7 + slot) * 0.4, r.z + r.dir * side * TRANSPORT.wing);
+  return ph;
+}
+const jumpLight = (ph) => (ph < -TRANSPORT.redMs ? 0 : ph < 0 ? 1 : 2); // off, red, green
+// Where a jumper stands: in the open door on the left side, at the back of the cabin.
+function jumpDoor(j, tau, out) {
+  const ph = transportPose(j.team, j.k, j.slot, tau, out), dir = j.team === 0 ? 1 : -1;
+  out.x -= dir * 3; out.z -= dir * 1.65; out.y -= 1.25;
+  return ph;
+}
+// The next Vic far enough out to give a new jumper time to stand up before the red light.
+function nextJump(team, tau, slot) {
+  const off = team ? TRANSPORT.runMs / 2 : 0;
+  return { team, slot, k: Math.ceil((Math.max(tau + TRANSPORT.redMs + 1200, 1000) - off) / TRANSPORT.runMs), light: -1, delay: 0 };
+}
+
+// Where each role enters: pilots from their side's sky, paratroopers in a troop carrier,
 // Allied infantry in landing craft at sea, Axis infantry in the rear trenches and fields.
-function ddaySpawn(role, team, enemies) {
+function ddaySpawn(role, team, enemies, tau = 0, slot = 2) {
   const toward = team === 0 ? -Math.PI / 2 : Math.PI / 2;
   if (role === 'jet') return { pos: new V3(team === 0 ? -(mapHalf + 25) : mapHalf + 25, rand(75, 115), rand(-200, 200)), yaw: toward, form: FORM.plane };
   if (role === 'para') {
-    // Paratroopers drop around a random flag.
-    const flags = MAPS.normandy.zones.dom, [fx, fz] = flags[Math.floor(Math.random() * flags.length)];
-    return { pos: new V3(Math.max(-60, fx + rand(-45, 45)), CHUTE.y + rand(-12, 12), fz + rand(-45, 45)), yaw: toward, form: FORM.chute };
+    const jump = nextJump(team, tau, slot), pos = new V3();
+    jumpDoor(jump, tau, pos);
+    return { pos, yaw: toward, form: FORM.ride, jump };
   }
   if (team === 0) return { pos: new V3(BOAT.startX - rand(0, 25), 0.35, rand(-190, 190)), yaw: toward, form: FORM.boat };
   const rear = navPts.filter((p) => p.x > mapHalf - 55 && Math.abs(p.z) < 170), pool = rear.length ? rear : navPts;
@@ -2214,6 +2256,64 @@ function makeBoat() {
   g.userData.ramp = ramp;
   return g;
 }
+// Troop carriers: an Allied C-47 in olive drab with invasion stripes, an Axis Ju 52 with three engines and fixed wheels.
+const transportGeo = {};
+const lampGeo = new THREE.BoxGeometry(0.08, 0.16, 0.16);
+const LAMP_COLORS = [0x222222, 0xff2a1a, 0x2aff4a];
+function makeTransport(team) {
+  if (!transportGeo[team]) {
+    const body = team === 0 ? 0x5a6340 : 0x4c5644, belly = team === 0 ? 0x8a8f7c : 0x93a7ae, dark = 0x222222, glass = 0x2a3a48, w = 0xe8e8e0, k = 0x111111;
+    const parts = [
+      [2.4, 2.5, 13, 0, 0, 0.5, body], [2.0, 2.0, 2.2, 0, -0.1, -6.8, body], [1.7, 0.55, 0.9, 0, 0.85, -6.3, glass],
+      [1.5, 1.6, 3.4, 0, 0.35, 8.6, body], [2.2, 0.35, 12.5, 0, -1.25, 0.6, belly],
+      [24, 0.3, 3.4, 0, -0.75, -1.6, body], [8.4, 0.22, 2.2, 0, 0.6, 9.4, body], [0.22, 3.2, 2.6, 0, 2.1, 9.4, body],
+      [0.06, 1.75, 1.15, -1.22, -0.05, 3, k], // the open door on the left
+    ];
+    // Engine nacelles with a dark cowling ring at the front.
+    for (const x of team === 0 ? [-4.4, 4.4] : [-4.6, 0, 4.6]) parts.push(x ? [1.2, 1.2, 2.8, x, -0.55, -3.3, body] : [1.4, 1.4, 1.2, 0, -0.1, -8.3, body], [1.35, 1.35, 0.45, x, x ? -0.55 : -0.1, x ? -4.75 : -9.0, dark]);
+    if (team === 0) {
+      for (const [x, c] of [[6.4, w], [6.9, k], [7.4, w], [7.9, k], [8.4, w]]) parts.push([0.5, 0.32, 3.42, x, -0.75, -1.6, c], [0.5, 0.32, 3.42, -x, -0.75, -1.6, c]);
+      for (const [z, c] of [[4.4, w], [4.9, k], [5.4, w], [5.9, k], [6.4, w]]) parts.push([2.45, 2.55, 0.5, 0, 0, z, c]);
+    } else {
+      parts.push([2.45, 2.55, 0.8, 0, 0, 5.4, 0xd8b43a]);
+      for (const x of [-2.4, 2.4]) parts.push([0.25, 1.4, 0.25, x, -1.6, -2.2, dark], [0.35, 0.95, 0.95, x, -2.3, -2.2, dark]);
+    }
+    transportGeo[team] = colourBoxes(parts);
+  }
+  const g = new THREE.Group();
+  g.rotation.order = 'YXZ';
+  const body = new THREE.Mesh(transportGeo[team], vcMat);
+  body.castShadow = true;
+  // The jump light beside the door.
+  const lamp = new THREE.Mesh(lampGeo, new THREE.MeshBasicMaterial({ color: LAMP_COLORS[0] }));
+  lamp.position.set(-1.25, 0.95, 2.3);
+  g.add(body, lamp);
+  g.userData.lamp = lamp;
+  return g;
+}
+const transportPool = [[], []], _tp = new V3(), _slotPos = new V3();
+function updateTransports() {
+  const used = [0, 0];
+  if (isDday() && match) {
+    const tau = serverNow() - match.startAt, reach = (TRANSPORT.reach + 250) / TRANSPORT.speed * 1000;
+    for (const team of [0, 1]) {
+      const off = team ? TRANSPORT.runMs / 2 : 0, pool = transportPool[team];
+      for (let k = Math.ceil((tau - off - reach) / TRANSPORT.runMs); k * TRANSPORT.runMs + off <= tau + reach; k++) {
+        for (let slot = 0; slot < 3; slot++) {
+          const ph = transportPose(team, k, slot, tau, _tp);
+          if (Math.abs(_tp.x) > TRANSPORT.reach) continue;
+          let m = pool[used[team]++];
+          if (!m) { m = makeTransport(team); scene.add(m); pool.push(m); }
+          m.visible = true;
+          m.position.copy(_tp);
+          m.rotation.set(0, team === 0 ? -Math.PI / 2 : Math.PI / 2, Math.sin(tau / 1700 + k + slot) * 0.03);
+          m.userData.lamp.material.color.setHex(LAMP_COLORS[ph > TRANSPORT.greenMs ? 0 : jumpLight(ph)]);
+        }
+      }
+    }
+  }
+  for (const team of [0, 1]) for (let i = used[team]; i < transportPool[team].length; i++) transportPool[team][i].visible = false;
+}
 const bombGeo = new THREE.CapsuleGeometry(0.16, 0.7, 4, 8).rotateX(Math.PI / 2);
 const bombMat = new THREE.MeshStandardMaterial({ color: 0x3a3d33, roughness: 0.6, metalness: 0.4 });
 
@@ -2264,17 +2364,22 @@ function clearDday() {
   if (myPlane) { scene.remove(myPlane); myPlane = null; }
   for (const x of beachedBoats) scene.remove(x.b);
   beachedBoats.length = 0;
-  P.flight = null; P.chute = false; P.form = FORM.ground;
+  P.flight = null; P.chute = false; P.form = FORM.ground; P.jump = null; P.chuteAt = 0;
   $('flighthud').classList.add('hidden');
+  $('jumplight').className = 'hidden';
 }
 function setupRoleSpawn() {
   const role = roleOf(myId), team = myTeam() === 1 ? 1 : 0;
   const enemies = [...remotes.values()].filter((r) => r.alive && r.has && isEnemy(r.id)).map((r) => r.group.position);
-  const sp = ddaySpawn(role, team, enemies);
+  // You ride the right wing of the Vic, so the door looks across at the rest of the formation.
+  const sp = ddaySpawn(role, team, enemies, serverNow() - match.startAt, 2);
   clearDday();
   P.pos.copy(sp.pos); P.viewY = sp.pos.y; P.yaw = sp.yaw; P.pitch = 0; P.vel.set(0, 0, 0);
   P.form = sp.form;
   P.chute = sp.form === FORM.chute;
+  P.jump = sp.jump || null;
+  // In the door you face out of it, forward and left, toward the rest of the Vic.
+  if (P.jump) { P.yaw = sp.yaw + 1.0; P.pitch = -0.15; }
   if (sp.form === FORM.plane) {
     P.flight = { speed: PLANE.speed, yaw: sp.yaw, pitch: 0, roll: 0, nextGun: 0, nextBomb: 0, side: 1, crashed: false };
     myPlane = makePlane(team);
@@ -2298,6 +2403,38 @@ function updateRide(dt, now) {
     P.pos.set(BOAT.landX + 3.2, 0, r.z); P.viewY = 0;
     notify('RAMP DOWN — TAKE THE BEACH', 'GO GO GO');
   }
+}
+// Standing in the door of a troop carrier: red light READY, green light JUMP. Space jumps on the green;
+// anyone still aboard when it goes out gets pushed (the jumpmaster clears the plane over the drop zone).
+function updateJump(canMove) {
+  const j = P.jump, tau = serverNow() - match.startAt;
+  let ph = jumpDoor(j, tau, P.pos);
+  // After a stall (a hidden tab), still go out over the drop zone rather than wherever the plane is now.
+  if (ph > TRANSPORT.greenMs) ph = jumpDoor(j, tau - (ph - TRANSPORT.greenMs), P.pos);
+  const light = jumpLight(ph);
+  P.vel.set(0, 0, 0); P.viewY = P.pos.y; P.grounded = true;
+  P.shake = Math.max(P.shake, 0.3);
+  const zone = 'ABCDE'[transportRun(j.team, j.k).flag];
+  if (light !== j.light) {
+    j.light = light;
+    $('jumplight').className = ['', 'red', 'green'][light];
+    setText('jlText', ['STAND UP — HOOK UP', 'READY', 'JUMP!'][light]);
+    if (light === 1) playTone(480, 0.6, 0.12, 'sine');
+    if (light === 2) { playTone(900, 0.18, 0.18, 'square'); playTone(900, 0.18, 0.18, 'square', 0.25); }
+  }
+  setText('jlSub', light === 2 ? 'Press SPACE to jump' : light === 1 ? `Stand in the door • drop zone ${zone}` : `Drop zone ${zone} in ${Math.ceil(-ph / 1000)}s`);
+  if (light === 2 && ((canMove && keys.has('Space')) || ph >= TRANSPORT.greenMs)) jumpOut();
+}
+function jumpOut() {
+  const dir = P.jump.team === 0 ? 1 : -1;
+  P.jump = null;
+  $('jumplight').className = 'hidden';
+  // Out the left door with some of the plane's speed; the static line opens the chute a moment later.
+  P.form = FORM.ground; P.grounded = false; P.shake = 0;
+  P.vel.set(dir * 9, -1, -dir * 4);
+  P.chuteAt = performance.now() + 900;
+  playNoise(0.8, 700, 0.35);
+  sendState(true);
 }
 function crashMe() {
   P.flight.crashed = true;
@@ -2468,7 +2605,7 @@ const P = {
   reloadUntil: 0, reloadStart: 0, swapUntil: 0, nextFire: 0, wantShot: false, bloom: 0, kick: 0, camKick: 0,
   bobPhase: 0, stepDist: 0, viewY: 0, sprinting: false, jumpReady: 0, deathAt: 0, killerId: null, swayX: 0, swayY: 0,
   equip: { frag: 0, smoke: 0 }, throwReady: 0, throwUntil: 0, shake: 0, meleeUntil: 0,
-  form: 0, flight: null, chute: false, ride: null,
+  form: 0, flight: null, chute: false, ride: null, jump: null, chuteAt: 0,
 };
 if (!LOADOUTS[P.loadout]) P.loadout = 'assault';
 const RADIUS = 0.38, GRAVITY = 22;
@@ -2577,7 +2714,7 @@ function finishReload() {
 }
 
 function throwGrenade(kind, now) {
-  if (!P.alive || now < P.throwReady || now < P.swapUntil) return;
+  if (!P.alive || P.jump || now < P.throwReady || now < P.swapUntil) return;
   if (P.equip[kind] <= 0) { sfx.empty(); return; }
   P.equip[kind]--;
   P.throwReady = now + 900; P.throwUntil = now + 450; P.reloadUntil = 0; P.adsT = 0;
@@ -2603,6 +2740,10 @@ function toggleCrouch() {
 }
 
 function updateMovement(dt, now, canMove) {
+  if (P.chuteAt && now >= P.chuteAt) {
+    P.chuteAt = 0;
+    if (!P.grounded) { P.chute = true; P.form = FORM.chute; playNoise(0.3, 250, 0.5); }
+  }
   const fwdIn = canMove ? (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0) : 0;
   const strafe = canMove ? (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0) : 0;
   const d = curW().def;
@@ -3125,8 +3266,9 @@ class LocalMatch {
     const gun = LOADOUTS[loadout].weapons[loadout === 'marksman' ? Math.floor(Math.random() * 2) : 0];
     return { id, name: name || (team === 0 ? 'Pvt. ' : 'Gfr. ') + DDAY_NAMES[Math.floor(Math.random() * DDAY_NAMES.length)], loadout, role, char: 'bulwark', gun, wid: gun, w: WEAPONS[gun],
       team, kills: 0, deaths: 0, hp: 100, alive: false, diedAt: 0, lastHit: 0, lastShot: -1e9, pos: new V3(), vel: new V3(), grounded: true,
-      yaw: 0, pitch: 0, roll: 0, mag: WEAPONS[gun].mag, ai: null, sentAt: 0, form: FORM.ground, flight: null, ride: null, isBot: true };
+      yaw: 0, pitch: 0, roll: 0, mag: WEAPONS[gun].mag, ai: null, sentAt: 0, form: FORM.ground, flight: null, ride: null, jump: null, isBot: true };
   }
+  matchStart() { return this.startAt; }
   send(m) { queueMicrotask(() => onMsg(m)); }
   pub(p) { return { id: p.id, name: p.name, loadout: p.loadout, char: p.char, team: p.team, role: p.role || '', bot: !p.isMe, kills: p.kills, deaths: p.deaths, hp: Math.round(p.hp), alive: p.alive }; }
   obj() {
@@ -3255,7 +3397,7 @@ class LocalMatch {
   // Enemies of `self` that are alive, with live position references.
   targets(self) {
     const list = [];
-    const foe = (p) => p !== self && p.alive && (!this.teams || p.team !== self.team);
+    const foe = (p) => p !== self && p.alive && p.form !== FORM.ride && (!this.teams || p.team !== self.team);
     if (foe(this.me) && P.alive) list.push({ id: 1, ent: this.me, pos: P.pos });
     for (const b of this.bots) if (foe(b)) list.push({ id: b.id, ent: b, pos: b.pos });
     return list;
@@ -3301,13 +3443,72 @@ class LocalMatch {
       burst: 0, burstLen: randInt(this.diff.burst), nadeReady: 0, strafe: 0, strafeT: 0, thinkT: Math.random() * 0.3, stuckT: 0, lastPos: sp.clone(), alertId: null, alertUntil: 0, goalIdx: -1 };
   }
   spawnDdayBot(b) {
-    const s = ddaySpawn(b.role, b.team, this.targets(b).map((t) => t.pos));
+    const s = ddaySpawn(b.role, b.team, this.targets(b).map((t) => t.pos), serverNow() - this.matchStart(), 0);
     b.wid = b.gun; b.w = WEAPONS[b.gun]; b.mag = b.w.mag; b.nades = 1;
     b.pos.copy(s.pos); b.vel.set(0, 0, 0); b.grounded = false; b.yaw = s.yaw; b.pitch = 0; b.roll = 0; b.sentAt = 0;
     b.form = s.form;
-    b.flight = s.form === FORM.plane ? { speed: PLANE.speed * rand(0.9, 1.1), nextGun: 0, nextBomb: performance.now() + rand(2000, 8000), tgt: null, tgtT: 0 } : null;
+    const cruise = PLANE.speed * rand(0.9, 1.05);
+    b.flight = s.form === FORM.plane ? { speed: cruise, cruise, nextGun: 0, nextBomb: performance.now() + rand(2000, 8000), tgt: null, tgtT: 0, salvoAt: 0 } : null;
     b.ride = s.form === FORM.boat ? { x: s.pos.x, z: s.pos.z } : null;
-    b.ai = this.freshAI(s.pos);
+    b.jump = s.jump || null;
+    if (b.jump) {
+      // Board the emptiest plane of the Vic; its paratroopers go out one after another (a "stick").
+      if (!this.sticks || this.sticks.size > 300) this.sticks = new Map();
+      const seat = (slot) => this.sticks.get(`${b.team}:${b.jump.k}:${slot}`) || 0;
+      b.jump.slot = [0, 1, 2].sort((x, y) => seat(x) - seat(y))[0];
+      jumpDoor(b.jump, serverNow() - this.matchStart(), b.pos);
+      b.jump.delay = Math.min(TRANSPORT.greenMs - 150, 200 + this.stickPlace(b.jump) * 380 + rand(0, 120));
+    }
+    if (b.flight) this.joinFlight(b);
+    b.ai = this.freshAI(b.pos);
+  }
+  stickPlace(j) {
+    const key = `${j.team}:${j.k}:${j.slot}`, n = this.sticks.get(key) || 0;
+    this.sticks.set(key, n + 1);
+    return n;
+  }
+  // Paratroopers stand in the door until the green light, then jump in turn.
+  updateBotJump(b, now) {
+    const j = b.jump, tau = now - this.matchStart(), ph = jumpDoor(j, tau, b.pos), dir = j.team === 0 ? 1 : -1;
+    b.vel.set(0, 0, 0); b.yaw = dir > 0 ? -Math.PI / 2 : Math.PI / 2;
+    if (ph < j.delay) return;
+    if (ph > j.delay + 100) jumpDoor(j, tau - (ph - j.delay), b.pos);
+    b.jump = null; b.form = FORM.chute; b.grounded = false;
+    b.vel.set(dir * 6, 0, -dir * 3);
+    b.ai.lastPos.copy(b.pos);
+  }
+  // Bot fighters fly in flights of four. The first plane of a flight still flying leads: it circles the
+  // flags, lines up bomb runs and picks fights. The rest hold their finger-four (or Vic, or pair) slots,
+  // bomb when the leader does, and break off only to fight an enemy plane that comes close.
+  flightOf(b, now) {
+    if (this.flightsAt !== now) {
+      this.flightsAt = now;
+      this.flights = new Map();
+      for (const team of [0, 1]) {
+        const jets = this.bots.filter((x) => x.team === team && x.role === 'jet').sort((a, c) => a.id - c.id);
+        for (let i = 0; i < jets.length; i += 4) {
+          const up = jets.slice(i, i + 4).filter((x) => x.alive && x.flight);
+          up.forEach((x, j) => this.flights.set(x, { lead: up[0], mates: up, slot: FLIGHT_SLOTS[up.length][j] }));
+        }
+      }
+    }
+    return this.flights.get(b);
+  }
+  slotPos(lead, [sx, sb, sy], out) {
+    const fx = -Math.sin(lead.yaw), fz = -Math.cos(lead.yaw);
+    return out.set(lead.pos.x - fz * sx - fx * sb, lead.pos.y + sy, lead.pos.z + fx * sx - fz * sb);
+  }
+  // A fresh fighter tucks in behind its flight leader if the leader is still coming in from the edge,
+  // otherwise it enters level with the leader and catches up.
+  joinFlight(b) {
+    const jets = this.bots.filter((x) => x.team === b.team && x.role === 'jet').sort((a, c) => a.id - c.id);
+    const i = jets.indexOf(b), group = jets.slice(i - (i % 4), i - (i % 4) + 4);
+    const lead = group.find((x) => x !== b && x.alive && x.flight && x.form === FORM.plane);
+    if (!lead) return;
+    const slot = FLIGHT_SLOTS[4][Math.max(1, group.indexOf(b))];
+    if (Math.abs(lead.pos.x) > mapHalf - 60) { this.slotPos(lead, slot, b.pos); b.yaw = lead.yaw; }
+    else { b.pos.y = clamp(lead.pos.y + slot[2], 60, 140); b.pos.z = clamp(lead.pos.z, -200, 200); }
+    b.flight.speed = lead.flight.speed;
   }
   updateBotRide(b, dt) {
     const r = b.ride;
@@ -3321,28 +3522,46 @@ class LocalMatch {
   }
   // Bot pilots circle the flags, line up bomb runs on enemy soldiers, and dogfight enemy planes.
   updateBotPlane(b, dt, now) {
-    const f = b.flight, d = this.diff;
+    const f = b.flight, d = this.diff, fl = this.flightOf(b, now), lead = fl && fl.lead !== b ? fl.lead : null;
     f.tgtT -= dt;
-    if (f.tgtT <= 0 || (f.tgt && !f.tgt.ent.alive)) {
+    if (f.tgtT <= 0 || (f.tgt && !f.tgt.ent.alive) || (lead && f.tgt && now > f.breakUntil)) {
       f.tgtT = rand(4, 8);
       const foes = this.targets(b);
-      const planes = foes.filter((t) => t.ent.form === FORM.plane && t.pos.distanceTo(b.pos) < 260);
+      const planes = foes.filter((t) => t.ent.form === FORM.plane && t.pos.distanceTo(b.pos) < (lead ? 150 : 260));
       const ground = foes.filter((t) => t.ent.form !== FORM.plane && t.pos.y < 8 && Math.abs(t.pos.x) < mapHalf);
-      f.tgt = planes.length && Math.random() < 0.45 ? planes[Math.floor(Math.random() * planes.length)]
-        : ground.length ? ground[Math.floor(Math.random() * ground.length)] : null;
+      const any = (list) => list[Math.floor(Math.random() * list.length)];
+      if (lead) {
+        // A wingman fights an enemy fighter that comes close for a few seconds at most, then rejoins.
+        f.tgt = !f.tgt && planes.length && Math.random() < 0.5 ? any(planes) : null;
+        f.breakUntil = now + 7000;
+      } else f.tgt = planes.length && Math.random() < (fl?.mates.length > 1 ? 0.25 : 0.45) ? any(planes) : ground.length ? any(ground) : null;
     }
-    const T = f.tgt, dog = T && T.ent.form === FORM.plane;
-    let tx, ty, tz;
-    if (T) { tx = T.pos.x; tz = T.pos.z; ty = dog ? T.pos.y : 60; }
-    else { const dom = MAPS[this.cfg.map].zones.dom, zz = dom[Math.floor(now / 9000 + b.id) % dom.length]; tx = zz[0]; tz = zz[1]; ty = 85; }
-    const edge = mapHalf + 30;
-    if (Math.abs(b.pos.x) > edge || Math.abs(b.pos.z) > edge) { tx = 0; tz = 0; }
+    const T = f.tgt, dog = T && T.ent.form === FORM.plane, keep = lead && !dog;
+    let tx, ty, tz, rate = PLANE.turn * 0.85 * dt;
+    if (keep) {
+      // Hold the slot: steer for a point ahead of it (and always ahead of us, so an overshoot never
+      // turns us round), and speed up or ease off to draw level with it.
+      const s = this.slotPos(lead, fl.slot, _slotPos), lf = fwdOf(lead.yaw);
+      const ahead = (s.x - b.pos.x) * lf.x + (s.z - b.pos.z) * lf.z, look = 30 + Math.max(0, -ahead);
+      tx = s.x + lf.x * look; tz = s.z + lf.z * look; ty = s.y;
+      f.speed = Math.cos(lead.yaw - b.yaw) > 0.3 ? clamp(lead.flight.speed + ahead * 0.8, PLANE.min, PLANE.max) : damp(f.speed, lead.flight.speed, 1, dt);
+      rate *= 1.25;
+    } else {
+      // A leader with wingmen flies a little slower and turns gently so the outside planes can hold on.
+      const led = fl && fl.mates.length > 1 && !dog;
+      f.speed = damp(f.speed, (f.cruise || PLANE.speed) * (led ? 0.92 : 1), 1, dt);
+      if (led) rate *= 0.6;
+      if (T) { tx = T.pos.x; tz = T.pos.z; ty = dog ? T.pos.y : 60; }
+      else { const dom = MAPS[this.cfg.map].zones.dom, zz = dom[Math.floor(now / 9000 + b.id) % dom.length]; tx = zz[0]; tz = zz[1]; ty = 85; }
+      const edge = mapHalf + 30;
+      if (Math.abs(b.pos.x) > edge || Math.abs(b.pos.z) > edge) { tx = 0; tz = 0; }
+    }
     const dx = tx - b.pos.x, dz = tz - b.pos.z, horiz = Math.hypot(dx, dz) || 1;
     // A bomb run passes straight over the target before turning back.
-    const wantYaw = T && !dog && horiz < 30 ? b.yaw : Math.atan2(-dx, -dz);
+    const wantYaw = T && !dog && !keep && horiz < 30 ? b.yaw : Math.atan2(-dx, -dz);
     let wantPitch = clamp(Math.atan2(ty - b.pos.y, horiz), -0.35, 0.35);
-    if (b.pos.y < 40) wantPitch = 0.3;
-    const dyaw = Math.atan2(Math.sin(wantYaw - b.yaw), Math.cos(wantYaw - b.yaw)), rate = PLANE.turn * 0.85 * dt;
+    if (b.pos.y < 40) wantPitch = Math.max(wantPitch, 0.3);
+    const dyaw = Math.atan2(Math.sin(wantYaw - b.yaw), Math.cos(wantYaw - b.yaw));
     b.yaw += clamp(dyaw, -rate, rate);
     b.pitch += clamp(wantPitch - b.pitch, -rate, rate);
     b.roll = damp(b.roll || 0, clamp(-dyaw * 1.6, -1, 1), 3, dt);
@@ -3350,13 +3569,20 @@ class LocalMatch {
     b.pos.addScaledVector(fwd, f.speed * dt);
     b.vel.copy(fwd).multiplyScalar(f.speed);
     if (b.pos.y < 1.5 || (b.pos.y < 25 && !freeAt(b.pos.x, b.pos.y - 0.6, b.pos.z, 1.2))) { this.killSelf(b, 'crash'); return; }
+    const bomb = () => this.throwOut('bomb', b, b.pos.clone().add(new V3(0, -1.4, 0)), fwd.clone().multiplyScalar(f.speed * 0.9).add(new V3(0, -3, 0)));
+    if (keep) {
+      // Wingmen bomb on the leader's release.
+      if (f.salvoAt && now >= f.salvoAt) { f.salvoAt = 0; bomb(); }
+      return;
+    }
     if (!T) return;
     if (!dog && now >= f.nextBomb) {
       // Release when the drop arc lands on the target.
-      const lead = f.speed * 0.9 * Math.sqrt(Math.max(0, 2 * (b.pos.y - T.pos.y) / 20));
-      if (Math.abs(horiz - lead) < 10 && Math.abs(dyaw) < 0.2) {
+      const throwLen = f.speed * 0.9 * Math.sqrt(Math.max(0, 2 * (b.pos.y - T.pos.y) / 20));
+      if (Math.abs(horiz - throwLen) < 10 && Math.abs(dyaw) < 0.2) {
         f.nextBomb = now + rand(5000, 9000);
-        this.throwOut('bomb', b, b.pos.clone().add(new V3(0, -1.4, 0)), fwd.clone().multiplyScalar(f.speed * 0.9).add(new V3(0, -3, 0)));
+        bomb();
+        if (fl) fl.mates.forEach((m, i) => { if (m !== b) m.flight.salvoAt = now + 140 * i; });
       }
     }
     if (dog && now >= f.nextGun) {
@@ -3488,6 +3714,7 @@ class LocalMatch {
   }
   updateBot(b, dt, now) {
     if (b.flight) { this.updateBotPlane(b, dt, now); return; }
+    if (b.jump) { this.updateBotJump(b, now); return; }
     if (b.ride) { this.updateBotRide(b, dt); return; }
     const ai = b.ai, d = this.diff, w = b.w;
     const eye = new V3(b.pos.x, b.pos.y + 1.55, b.pos.z);
@@ -3659,7 +3886,8 @@ class HostBots extends LocalMatch {
       b.pos.copy(rp.group.position); b.yaw = rp.yaw; b.form = rp.form ?? b.form;
       if (b.form !== FORM.plane) b.flight = null;
       if (b.form !== FORM.boat) b.ride = null; else b.ride = { x: b.pos.x, z: b.pos.z };
-      if (b.form === FORM.plane && !b.flight) b.flight = { speed: PLANE.speed, nextGun: 0, nextBomb: 0, tgt: null, tgtT: 0 };
+      if (b.form === FORM.plane && !b.flight) b.flight = { speed: PLANE.speed, cruise: PLANE.speed, nextGun: 0, nextBomb: 0, tgt: null, tgtT: 0, salvoAt: 0 };
+      if (b.form !== FORM.ride) b.jump = null; else if (!b.jump) b.form = FORM.chute;
     }
     return b;
   }
@@ -3690,18 +3918,18 @@ class HostBots extends LocalMatch {
   }
   targets(self) {
     const list = [], foe = (team) => team !== self.team;
-    if (P.alive && foe(myTeam())) {
+    if (P.alive && foe(myTeam()) && P.form !== FORM.ride) {
       Object.assign(this.me, { team: myTeam(), alive: true, form: P.form || 0 });
       list.push({ id: myId, ent: this.me, pos: P.pos });
     }
     for (const rp of remotes.values()) {
-      if (!rp.alive || !rp.has || pInfo(rp.id)?.bot || !foe(teamOf(rp.id))) continue;
+      if (!rp.alive || !rp.has || rp.form === FORM.ride || pInfo(rp.id)?.bot || !foe(teamOf(rp.id))) continue;
       let h = this.humans.get(rp.id);
       if (!h) { h = { id: rp.id, vel: new V3(), lastShot: -1e9 }; this.humans.set(rp.id, h); }
       Object.assign(h, { alive: true, team: teamOf(rp.id), form: rp.form || 0, lastShot: serverNow() - (performance.now() - rp.lastShot) });
       list.push({ id: rp.id, ent: h, pos: rp.group.position });
     }
-    for (const b of this.bots) if (b !== self && b.alive && foe(b.team)) list.push({ id: b.id, ent: b, pos: b.pos });
+    for (const b of this.bots) if (b !== self && b.alive && b.form !== FORM.ride && foe(b.team)) list.push({ id: b.id, ent: b, pos: b.pos });
     return list;
   }
   tick(dt) {
@@ -3731,6 +3959,7 @@ class HostBots extends LocalMatch {
     if (b.length || this.shots.length) net.send({ t: 'bstate', b, s: this.shots });
     this.shots = [];
   }
+  matchStart() { return match?.startAt ?? 0; }
   onKilled(id) { const b = this.bots.find((x) => x.id === id); if (b) { b.alive = false; b.diedAt = serverNow(); b.asked = false; } }
   onSpawned(id) { const b = this.bots.find((x) => x.id === id); if (b && !b.alive) { b.alive = true; b.hp = 100; this.spawnDdayBot(b); } }
   onRole(id, role) { const b = this.bots.find((x) => x.id === id); if (b) b.role = role; }
@@ -3794,7 +4023,7 @@ function pickLoadout(key) {
   net.send({ t: 'setLoadout', loadout: key });
   refreshLoadoutViews();
 }
-const ROLE_DESC = { random: 'Let the game pick', inf: 'Allies land by boat, Axis hold the trenches', para: 'Drop in by parachute', jet: 'Fly a fighter: guns and bombs' };
+const ROLE_DESC = { random: 'Let the game pick', inf: 'Allies land by boat, Axis hold the trenches', para: 'Ride a troop plane in and jump', jet: 'Fly a fighter: guns and bombs' };
 function roleCards(container, selected, onPick, keysHint) {
   container.innerHTML = '';
   (isDday() ? ['inf', 'para', 'jet'] : ['random', 'inf', 'para', 'jet']).forEach((key, i) => {
@@ -3933,7 +4162,7 @@ function applyGo(m) {
     const role = me.role || 'inf';
     notify(`${teamName(me.team)} — ${ROLE_NAMES[role]}`, 'D-DAY');
     addFeedText(role === 'jet' ? 'Mouse steers • W/S throttle • Click: guns • Right-click/F/Space: bomb'
-      : role === 'para' ? 'Steer your parachute with WASD — you can shoot on the way down'
+      : role === 'para' ? 'Red light: READY. Green light: SPACE to jump. Steer the chute with WASD'
       : me.team === 0 ? 'Ride the landing craft in, then storm the beach' : 'Hold the line against the landing');
   } else if (mode.teams && me) notify(`${mode.name} — YOU ARE ${teamName(me.team)}`, mode.name);
 }
@@ -3986,8 +4215,8 @@ function onMyDeath(killerId) {
   if (P.flight && !P.flight.crashed) bigBoom(P.pos, 1.3);
   if (myPlane) { scene.remove(myPlane); myPlane = null; }
   endRide(true);
-  P.flight = null; P.chute = false; P.form = FORM.ground;
-  $('flighthud').classList.add('hidden'); $('ammo').classList.remove('hidden');
+  P.flight = null; P.chute = false; P.form = FORM.ground; P.jump = null; P.chuteAt = 0;
+  $('flighthud').classList.add('hidden'); $('ammo').classList.remove('hidden'); $('jumplight').className = 'hidden';
   P.alive = false; P.deathAt = performance.now(); P.killerId = killerId;
   P.adsT = 0; P.reloadUntil = 0; mouseL = false; mouseR = false;
   showViewmodel();
@@ -4428,8 +4657,8 @@ function frame(now) {
       updateFlightCamera(dt);
       sendState(false);
     } else if (P.alive && curW()) {
-      if (P.ride) updateRide(dt, now); else updateMovement(dt, now, canMove);
-      updateWeapon(dt, now, canMove && !P.ride);
+      if (P.jump) updateJump(canMove); else if (P.ride) updateRide(dt, now); else updateMovement(dt, now, canMove);
+      updateWeapon(dt, now, canMove && !P.ride && !P.jump);
       updateCamera(dt, now);
       updateViewmodel(dt, now);
       sendState(false);
@@ -4453,6 +4682,7 @@ function frame(now) {
   if (offline) offline.tick(dt, (ui === 'hud' && !pointerLocked) || adPlaying);
   if (botDirector) botDirector.tick(dt);
   updateDday(dt, now);
+  updateTransports();
   updateRemotes(dt, now);
   updateObjectives(now);
   updateGrenades(dt);
