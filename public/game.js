@@ -3,6 +3,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { createPost, skyMaterial, bakeSkyEnv, normalFromTex, addReverb } from './fx.js';
 
 const $ = (id) => document.getElementById(id);
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -49,7 +50,7 @@ const isDom = (mode) => mode === 'dom' || mode === 'dday';
 const domR = (mode) => (mode === 'dday' ? DDAY_R : DOM_R);
 
 
-const settings = Object.assign({ sens: 1, fov: 80, vol: 0.7, name: '', loadout: 'assault', char: 'bulwark', offMap: 'harbor', offMode: 'ffa', offBots: 5, offDiff: 'normal', ddayRole: 'random' },
+const settings = Object.assign({ fx: true, sens: 1, fov: 80, vol: 0.7, name: '', loadout: 'assault', char: 'bulwark', offMap: 'harbor', offMode: 'ffa', offBots: 5, offDiff: 'normal', ddayRole: 'random' },
   (() => { try { return JSON.parse(localStorage.getItem('frontline-settings')) || {}; } catch { return {}; } })());
 function saveSettings() { try { localStorage.setItem('frontline-settings', JSON.stringify(settings)); } catch {} }
 
@@ -90,17 +91,16 @@ scene.add(hemi);
 const muzzleLight = new THREE.PointLight(0xffb060, 0, 9, 2);
 scene.add(muzzleLight);
 
-const sky = new THREE.Mesh(new THREE.SphereGeometry(450, 32, 16), new THREE.ShaderMaterial({
-  side: THREE.BackSide, depthWrite: false,
-  uniforms: { top: { value: new THREE.Color() }, bottom: { value: new THREE.Color() } },
-  vertexShader: 'varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-  fragmentShader: 'uniform vec3 top; uniform vec3 bottom; varying vec3 vP; void main(){ float h = clamp(vP.y * 1.4 + 0.08, 0.0, 1.0); gl_FragColor = vec4(mix(bottom, top, pow(h, 0.6)), 1.0);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n}',
-}));
+const sky = new THREE.Mesh(new THREE.SphereGeometry(450, 32, 16), skyMaterial());
+const post = createPost(renderer);
+const fxState = { time: 0, dt: 0, hurt: 0, lowHp: 0, ads: 0, sunDir: sky.material.uniforms.sunDir.value, sunCol: sky.material.uniforms.sunCol.value };
+let skyEnv = null, fxHp = 100, fxHurt = 0;
 sky.renderOrder = -1;
 scene.add(sky);
 
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
+  post.setSize();
   camera.aspect = vmCamera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   vmCamera.updateProjectionMatrix();
@@ -347,6 +347,7 @@ function mat(key) {
     emissive: d.emissive ?? 0x000000, emissiveIntensity: d.ei ?? 1,
     alphaTest: d.alpha ? 0.5 : 0, side: d.alpha ? THREE.DoubleSide : THREE.FrontSide,
   });
+  if (m.map && !d.alpha) m.normalMap = normalFromTex(m.map, d.bump ?? 1.6);
   m.userData.ts = d.ts || 1;
   m.userData.surf = d.surf || 'dust';
   return (MATS[key] = m);
@@ -1018,7 +1019,12 @@ function loadMap(id) {
   const sc = sun.shadow.camera, ext = shadowFollow ? 150 : def.half + 8;
   sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.near = 1; sc.far = shadowFollow ? 520 : 250;
   sc.updateProjectionMatrix();
-  hemi.color.set(e.hemi[0]); hemi.groundColor.set(e.hemi[1]); hemi.intensity = e.hemi[2];
+  // The baked sky now lights the scene too, so the plain fill light is turned down a little.
+  hemi.color.set(e.hemi[0]); hemi.groundColor.set(e.hemi[1]); hemi.intensity = e.hemi[2] * 0.75;
+  const su = sky.material.uniforms;
+  su.sunDir.value.set(...e.sun[2]).normalize(); su.sunCol.value.set(e.sun[0]); su.ground.value.set(e.hemi[1]); su.uCloud.value = e.cloud ?? 0.5;
+  skyEnv = bakeSkyEnv(renderer, sky, skyEnv);
+  scene.environment = vmScene.environment = skyEnv.texture;
   renderer.toneMappingExposure = e.exposure;
   spawns = computeSpawns(def.half);
   radarImg = buildRadarImage(def.half);
@@ -1039,6 +1045,7 @@ function initAudio() {
   master = AC.createGain();
   master.gain.value = settings.vol;
   master.connect(comp);
+  addReverb(AC, master, comp);
   noiseBuf = AC.createBuffer(1, AC.sampleRate, AC.sampleRate);
   const d = noiseBuf.getChannelData(0);
   for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
@@ -4642,6 +4649,8 @@ for (const [id, key, fmt] of [['sens', 'sens', (v) => v.toFixed(2)], ['fov', 'fo
     if (key === 'vol' && master) master.gain.value = settings.vol;
   };
 }
+$('fxOn').checked = settings.fx;
+$('fxOn').onchange = () => { settings.fx = $('fxOn').checked; saveSettings(); };
 
 /* =============================== LOOP =============================== */
 
@@ -4696,11 +4705,23 @@ function frame(now) {
     sun.target.position.set(sx, 0, sz);
     sun.position.set(sx + sunOffset.x, sunOffset.y, sz + sunOffset.z);
   } else sun.target.position.set(0, 0, 0);
-  renderer.clear();
-  renderer.render(scene, camera);
-  if (ui === 'hud' && P.alive && vmRoot.visible) {
-    renderer.clearDepth();
-    renderer.render(vmScene, vmCamera);
+  const showVm = ui === 'hud' && P.alive && vmRoot.visible;
+  sky.material.uniforms.uTime.value = now / 1000;
+  if (settings.fx) {
+    if (P.hp < fxHp) fxHurt = 1;
+    fxHp = P.hp; fxHurt = Math.max(0, fxHurt - dt * 2.5);
+    const playing = ui === 'hud' && P.alive;
+    fxState.time = now / 1000; fxState.dt = dt;
+    fxState.hurt = playing ? fxHurt : 0; fxState.lowHp = playing ? clamp((45 - P.hp) / 45, 0, 1) : 0; fxState.ads = playing ? P.adsT : 0;
+    post.render(scene, camera, showVm ? vmScene : null, vmCamera, fxState);
+  } else {
+    renderer.setRenderTarget(null);
+    renderer.clear();
+    renderer.render(scene, camera);
+    if (showVm) {
+      renderer.clearDepth();
+      renderer.render(vmScene, vmCamera);
+    }
   }
 }
 loadMap('harbor');
