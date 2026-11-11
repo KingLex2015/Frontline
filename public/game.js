@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createPost, skyMaterial, bakeSkyEnv, normalFromTex, addReverb, wetGround, wetTime, wetAmt, createRain } from './fx.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1273,28 +1273,60 @@ const GUN_SPECS = {
   sniper: { recv: [0.06, 0.075, 0.44], hg: [0.055, 0.06, 0.34], barrel: 0.34, mag: 'small', stock: 0.28, sight: 'scope', accent: 0x3e4a34, bolt: true },
   dmr:    { recv: [0.06, 0.08, 0.38], hg: [0.056, 0.062, 0.28], barrel: 0.22, mag: 'small', stock: 0.24, sight: 'scope', accent: 0x6a5a40 },
 };
-const gunMetal = new THREE.MeshStandardMaterial({ color: 0x26282b, roughness: 0.45, metalness: 0.5 });
-const gunPoly = new THREE.MeshStandardMaterial({ color: 0x1b1c1e, roughness: 0.8, metalness: 0.1 });
-const sleeveMat = new THREE.MeshStandardMaterial({ color: 0x4a5236, roughness: 0.95 });
-const gloveMat = new THREE.MeshStandardMaterial({ color: 0x24221f, roughness: 0.9 });
+const gunMetal = new THREE.MeshStandardMaterial({ color: 0x40444a, roughness: 0.38, metalness: 0.7 });
+const gunPoly = new THREE.MeshStandardMaterial({ color: 0x2a2c30, roughness: 0.6, metalness: 0.05 });
+const gunDark = new THREE.MeshStandardMaterial({ color: 0x08080a, roughness: 0.9 });
+const brassMat = new THREE.MeshStandardMaterial({ color: 0xb48a3c, roughness: 0.3, metalness: 0.9 });
+const sleeveMat = new THREE.MeshStandardMaterial({ color: 0x748058, roughness: 0.95 });
+const gloveMat = new THREE.MeshStandardMaterial({ color: 0x4a443a, roughness: 0.85 });
 const lensMat = new THREE.MeshBasicMaterial({ color: 0xff3020 });
 const glassMat = new THREE.MeshStandardMaterial({ color: 0x223344, roughness: 0.1, metalness: 0.8, transparent: true, opacity: 0.6 });
+const dotGlassMat = new THREE.MeshStandardMaterial({ color: 0x6fa8c8, roughness: 0.05, metalness: 0.9, transparent: true, opacity: 0.16, depthWrite: false });
 
 function part(g, w, h, d, x, y, z, m, rx = 0) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
   mesh.position.set(x, y, z); mesh.rotation.x = rx; g.add(mesh); return mesh;
 }
-function cyl(g, r, len, x, y, z, m) {
-  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 12).rotateX(Math.PI / 2), m);
+function cyl(g, r, len, x, y, z, m, rRear = r, seg = 16) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(rRear, r, len, seg).rotateX(Math.PI / 2), m);
+  mesh.position.set(x, y, z); g.add(mesh); return mesh;
+}
+// A gun part cut from its side outline ([forward, up] points), w wide, with rounded-off edges.
+function slab(g, pts, w, m, bevel = 0.003, x = 0) {
+  const d = Math.max(w - bevel * 2, 0.001);
+  const geo = new THREE.ExtrudeGeometry(new THREE.Shape(pts.map(([u, v]) => new THREE.Vector2(u, v))),
+    { depth: d, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelOffset: -bevel, bevelSegments: 2 });
+  geo.translate(0, 0, -d / 2); geo.rotateY(Math.PI / 2);
+  const mesh = new THREE.Mesh(geo, m); mesh.position.x = x; g.add(mesh); return mesh;
+}
+// A hollow tube pointing down the barrel.
+function ring(g, ro, ri, len, x, y, z, m) {
+  const sh = new THREE.Shape(); sh.absarc(0, 0, ro, 0, Math.PI * 2);
+  const hole = new THREE.Path(); hole.absarc(0, 0, ri, 0, Math.PI * 2, true); sh.holes.push(hole);
+  const geo = new THREE.ExtrudeGeometry(sh, { depth: len, bevelEnabled: false, curveSegments: 20 });
+  geo.translate(0, 0, -len / 2);
+  const mesh = new THREE.Mesh(geo, m); mesh.position.set(x, y, z); g.add(mesh); return mesh;
+}
+// A round pin or knob sticking out of the side of the gun.
+function pin(g, r, len, x, y, z, m) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 12).rotateZ(Math.PI / 2), m);
   mesh.position.set(x, y, z); g.add(mesh); return mesh;
 }
 function addArms(g, rightHand, leftHand) {
-  part(g, 0.06, 0.06, 0.07, ...rightHand, gloveMat);
-  const ra = part(g, 0.075, 0.075, 0.34, rightHand[0] + 0.07, rightHand[1] - 0.07, rightHand[2] + 0.17, sleeveMat);
-  ra.rotation.set(0.35, -0.35, 0);
-  part(g, 0.06, 0.06, 0.08, ...leftHand, gloveMat);
-  const la = part(g, 0.075, 0.075, 0.38, leftHand[0] - 0.1, leftHand[1] - 0.08, leftHand[2] + 0.16, sleeveMat);
-  la.rotation.set(0.3, 0.6, 0);
+  const arm = (h, len, ox, oy, oz, rx, ry) => {
+    const fist = new THREE.Mesh(new THREE.SphereGeometry(0.036, 14, 10), gloveMat);
+    fist.scale.set(0.95, 0.85, 1.15); fist.position.set(...h); g.add(fist);
+    const fingers = new THREE.Mesh(new THREE.CapsuleGeometry(0.015, 0.04, 4, 8).rotateZ(Math.PI / 2), gloveMat);
+    fingers.position.set(h[0], h[1] + 0.006, h[2] - 0.03); g.add(fingers);
+    const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.011, 0.03, 4, 8).rotateX(Math.PI / 2), gloveMat);
+    thumb.position.set(h[0] - 0.03, h[1] + 0.02, h[2] - 0.012); g.add(thumb);
+    const a = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.036, len, 14).rotateX(Math.PI / 2), sleeveMat);
+    a.position.set(h[0] + ox, h[1] + oy, h[2] + oz); a.rotation.set(rx, ry, 0); g.add(a);
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.039, 0.03, 14).rotateX(Math.PI / 2), gloveMat);
+    cuff.position.set(h[0] + ox * 0.22, h[1] + oy * 0.22, h[2] + oz * 0.22); cuff.rotation.set(rx, ry, 0); g.add(cuff);
+  };
+  arm(rightHand, 0.34, 0.07, -0.07, 0.17, 0.35, -0.35);
+  arm(leftHand, 0.38, -0.1, -0.08, 0.16, 0.3, 0.6);
 }
 function addFlash(g, z, y) {
   const muzzle = new THREE.Object3D(); muzzle.position.set(0, y, z); g.add(muzzle);
@@ -1305,22 +1337,29 @@ function addFlash(g, z, y) {
 function buildGun(id) {
   const def = WEAPONS[id], g = new THREE.Group();
   if (def.model === 'knife') {
-    const blade = new THREE.MeshStandardMaterial({ color: 0xb8bcc0, roughness: 0.25, metalness: 0.9 });
-    part(g, 0.03, 0.035, 0.12, 0, 0, 0.0, gunPoly);
+    const blade = new THREE.MeshStandardMaterial({ color: 0xb8bcc0, roughness: 0.22, metalness: 0.95 });
+    const h = new THREE.Mesh(new THREE.CapsuleGeometry(0.017, 0.09, 4, 10).rotateX(Math.PI / 2), gunPoly); h.scale.x = 0.8; g.add(h);
     part(g, 0.07, 0.015, 0.02, 0, 0.005, -0.07, gunMetal);
-    part(g, 0.008, 0.04, 0.2, 0, 0.008, -0.17, blade);
-    part(g, 0.006, 0.02, 0.05, 0, 0.0, -0.285, blade, 0.5);
+    // blade: straight spine, belly sweeping up to a clipped point
+    slab(g, [[0.08, -0.014], [0.08, 0.03], [0.24, 0.03], [0.3, 0.014], [0.26, -0.006], [0.12, -0.016]], 0.006, blade, 0.0025);
     part(g, 0.06, 0.06, 0.08, 0, -0.01, 0.01, gloveMat);
-    const arm = part(g, 0.075, 0.075, 0.36, 0.05, -0.06, 0.2, sleeveMat); arm.rotation.set(0.3, -0.25, 0);
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.036, 0.36, 14).rotateX(Math.PI / 2), sleeveMat);
+    arm.position.set(0.05, -0.06, 0.2); arm.rotation.set(0.3, -0.25, 0); g.add(arm);
     g.rotation.set(0.15, 0.25, -0.35);
     g.userData.sightY = 0; g.userData.adsZ = -0.4; g.userData.hip = new V3(0.2, -0.2, -0.38);
     const dummy = new THREE.Sprite(new THREE.SpriteMaterial()); dummy.visible = false; g.add(dummy); g.userData.flash = dummy;
     return g;
   }
   if (def.model === 'pistol') {
-    part(g, 0.034, 0.04, 0.19, 0, 0.03, -0.07, gunMetal);
-    part(g, 0.03, 0.03, 0.17, 0, 0.0, -0.06, gunPoly);
-    part(g, 0.03, 0.11, 0.045, 0, -0.06, 0.0, gunPoly, -0.25);
+    slab(g, [[-0.03, 0.012], [-0.03, 0.045], [-0.022, 0.05], [0.16, 0.05], [0.166, 0.044], [0.166, 0.012]], 0.032, gunMetal, 0.003);
+    // frame, trigger guard root and raked grip in one piece
+    slab(g, [[-0.036, 0.012], [0.15, 0.012], [0.15, -0.004], [0.07, -0.012], [0.03, -0.014], [0.012, -0.022], [-0.012, -0.115], [-0.058, -0.108], [-0.04, -0.02]], 0.03, gunPoly, 0.005);
+    part(g, 0.01, 0.004, 0.05, 0, -0.045, -0.042, gunPoly);
+    part(g, 0.01, 0.034, 0.004, 0, -0.03, -0.067, gunPoly);
+    part(g, 0.006, 0.022, 0.006, 0, -0.027, -0.03, gunMetal, 0.3);
+    for (let i = 0; i < 5; i++) part(g, 0.0335, 0.03, 0.003, 0, 0.03, 0.02 - i * 0.008, gunDark);
+    part(g, 0.02, 0.002, 0.035, 0, 0.0505, -0.06, gunDark);
+    ring(g, 0.008, 0.0045, 0.012, 0, 0.034, -0.166, brassMat);
     part(g, 0.006, 0.012, 0.01, 0, 0.056, -0.155, gunMetal);
     part(g, 0.02, 0.012, 0.01, 0, 0.056, 0.015, gunMetal);
     addArms(g, [0, -0.06, 0.02], [0, -0.08, 0.0]);
@@ -1328,42 +1367,100 @@ function buildGun(id) {
     g.userData.sightY = 0.062; g.userData.adsZ = -0.3; g.userData.hip = new V3(0.14, -0.15, -0.34);
     return g;
   }
-  const s = GUN_SPECS[def.model];
-  const accent = new THREE.MeshStandardMaterial({ color: s.accent, roughness: 0.7, metalness: 0.15 });
-  const [rw, rh, rl] = s.recv, [hw, hh, hl] = s.hg;
+  const s = GUN_SPECS[def.model], rifle = def.model === 'sniper' || def.model === 'dmr';
+  const accent = new THREE.MeshStandardMaterial({ color: s.accent, roughness: 0.6, metalness: 0.15 });
+  const [rw, rh, rl] = s.recv, [hw, hh, hl] = s.hg, t = rh / 2;
   const z0 = 0.1, recvEnd = z0 - rl, hgEnd = recvEnd - hl, barEnd = hgEnd - s.barrel;
-  part(g, rw, rh, rl, 0, 0, z0 - rl / 2, gunMetal);
-  part(g, rw * 0.7, 0.014, rl * 0.9, 0, rh / 2 + 0.007, z0 - rl / 2, gunMetal);
-  part(g, hw, hh, hl, 0, 0.003, recvEnd - hl / 2, accent);
-  cyl(g, 0.011, s.barrel, 0, 0.01, hgEnd - s.barrel / 2, gunMetal);
-  cyl(g, 0.018, 0.05, 0, 0.01, barEnd - 0.02, gunMetal);
-  part(g, 0.035, 0.1, 0.045, 0, -rh / 2 - 0.04, 0.04, gunPoly, -0.35);
-  part(g, rw * 0.8, rh * 0.85, s.stock, 0, -0.005, z0 + s.stock / 2, accent);
-  part(g, rw * 0.85, rh * 1.3, 0.025, 0, -0.01, z0 + s.stock, gunPoly);
-  const magZ = z0 - rl * 0.55;
-  if (s.mag === 'stick') part(g, 0.045, 0.16, 0.07, 0, -rh / 2 - 0.07, magZ, gunPoly, 0.22);
-  else if (s.mag === 'box') { part(g, 0.1, 0.12, 0.12, 0.02, -rh / 2 - 0.06, magZ, accent); part(g, 0.03, 0.02, 0.08, -0.05, rh / 2 - 0.01, magZ, gunMetal); }
-  else part(g, 0.045, 0.07, 0.08, 0, -rh / 2 - 0.035, magZ, gunPoly);
-  if (s.bipod) { part(g, 0.012, 0.012, 0.12, 0.025, -0.04, hgEnd + 0.06, gunMetal, 0.3); part(g, 0.012, 0.012, 0.12, -0.025, -0.04, hgEnd + 0.06, gunMetal, 0.3); }
-  if (s.bolt) { const k = part(g, 0.012, 0.012, 0.05, 0.05, 0.01, z0 - 0.08, gunMetal); k.rotation.y = 0.5; }
-  const sightZ = z0 - rl * 0.45;
-  if (s.sight === 'dot') {
-    part(g, 0.04, 0.012, 0.07, 0, rh / 2 + 0.02, sightZ, gunMetal);
-    part(g, 0.006, 0.05, 0.05, 0.017, rh / 2 + 0.045, sightZ, gunMetal);
-    part(g, 0.006, 0.05, 0.05, -0.017, rh / 2 + 0.045, sightZ, gunMetal);
-    part(g, 0.04, 0.008, 0.05, 0, rh / 2 + 0.07, sightZ, gunMetal);
-    part(g, 0.004, 0.004, 0.001, 0, rh / 2 + 0.045, sightZ - 0.015, lensMat);
-    g.userData.sightY = rh / 2 + 0.045;
+  // Outlines below use u = distance forward (toward the muzzle) and v = up.
+  const U0 = -z0, U1 = -recvEnd, um = rl * 0.55 - z0, mh = def.model === 'smg' ? 0.022 : 0.04;
+  // receiver: flat-topped upper, lower sloping up behind the grip
+  slab(g, [[U0, -t * 0.4], [U0, t - 0.012], [U0 + 0.015, t], [U1, t], [U1, -t * 0.55], [U1 - 0.035, -t], [U0 + 0.05, -t], [U0 + 0.015, -t * 0.4]], rw, gunMetal, 0.004);
+  part(g, rw * 0.9, 0.008, 0.03, 0, t - 0.001, z0 - 0.006, gunPoly);                      // charging handle
+  // rail with teeth along the top
+  part(g, rw * 0.62, 0.008, rl * 0.9, 0, t + 0.004, z0 - rl / 2, gunMetal);
+  for (let z = z0 - rl * 0.94; z < z0 - rl * 0.06; z += 0.013) part(g, rw * 0.68, 0.006, 0.007, 0, t + 0.011, z, gunMetal);
+  // left-side controls you see from behind the gun
+  const lx = -rw / 2 - 0.001;
+  pin(g, 0.005, 0.005, lx, -t * 0.55, 0.0, gunDark); pin(g, 0.005, 0.005, lx, -t * 0.6, -(U1 - 0.05), gunDark);
+  pin(g, 0.007, 0.006, lx, -t * 0.1, 0.04, gunPoly); part(g, 0.004, 0.005, 0.022, lx, -t * 0.1, 0.03, gunPoly);
+  part(g, 0.005, 0.024, 0.012, lx, 0, -um, gunPoly);
+  // handguard: eight-sided tube with cooling slots and a ring at the front
+  const hgGeo = new THREE.CylinderGeometry(hh / 1.85, hh / 1.85, hl, 8).rotateY(Math.PI / 8).rotateX(Math.PI / 2).toNonIndexed();
+  hgGeo.computeVertexNormals();
+  const hgm = new THREE.Mesh(hgGeo, accent); hgm.scale.x = hw / hh; hgm.position.set(0, 0.003, recvEnd - hl / 2); g.add(hgm);
+  if (!s.bolt) for (let z = recvEnd - 0.035; z > hgEnd + 0.02; z -= 0.042) part(g, hw + 0.0015, hh * 0.2, 0.024, 0, 0.003, z, gunDark);
+  part(g, hw * 0.5, 0.008, hl * 0.94, 0, 0.003 + hh / 2, recvEnd - hl / 2, gunMetal);
+  ring(g, hh * 0.46, 0.011, 0.012, 0, 0.006, hgEnd, gunMetal);
+  // barrel, gas block and a hollow muzzle brake with ports
+  cyl(g, 0.0095, s.barrel + 0.03, 0, 0.01, hgEnd - s.barrel / 2 + 0.015, gunMetal);
+  if (s.barrel > 0.12) { part(g, 0.024, 0.03, 0.03, 0, 0.014, hgEnd - 0.035, gunMetal); }
+  const mr = s.bolt ? 0.02 : 0.0155, ml = s.bolt ? 0.075 : 0.055;
+  ring(g, mr, 0.0068, ml, 0, 0.01, barEnd - 0.045 + ml / 2, gunMetal);
+  for (let i = 0; i < 3; i++) part(g, mr * 2.04, 0.007, 0.007, 0, 0.01, barEnd - 0.034 + i * 0.014, gunDark);
+  // pistol grip, trigger guard and trigger
+  slab(g, [[-0.02, -t + 0.004], [-0.062, -t + 0.004], [-0.094, -t - 0.105], [-0.05, -t - 0.11], [-0.034, -t - 0.03]], 0.032, gunPoly, 0.006);
+  const gu1 = Math.min(um - mh, 0.06);
+  part(g, 0.012, 0.004, gu1 + 0.03, 0, -t - 0.04, -(gu1 - 0.03) / 2, gunMetal);
+  part(g, 0.012, 0.04, 0.004, 0, -t - 0.02, -gu1, gunMetal);
+  part(g, 0.006, 0.026, 0.006, 0, -t - 0.016, -0.008, gunMetal, 0.3);
+  // stock
+  const SB = U0 - s.stock;
+  if (rifle) {
+    // one-piece rifle stock with a raised cheek rest
+    slab(g, [[U0 + 0.01, t * 0.6], [U0 - s.stock * 0.35, t * 0.5], [U0 - s.stock * 0.42, t + 0.014], [SB, t + 0.014], [SB, -t - 0.06], [SB + 0.035, -t - 0.06], [U0 - s.stock * 0.45, -t * 0.9], [U0 + 0.01, -t * 0.8]], rw * 0.88, accent, 0.006);
+    part(g, rw * 0.9, rh + 0.078, 0.014, 0, -0.023, -SB + 0.007, gunDark);
   } else {
-    cyl(g, 0.026, 0.3, 0, rh / 2 + 0.045, sightZ, gunMetal);
-    cyl(g, 0.032, 0.06, 0, rh / 2 + 0.045, sightZ - 0.15, gunMetal);
-    cyl(g, 0.03, 0.05, 0, rh / 2 + 0.045, sightZ + 0.14, gunMetal);
-    part(g, 0.035, 0.03, 0.04, 0, rh / 2 + 0.012, sightZ - 0.06, gunMetal);
-    part(g, 0.035, 0.03, 0.04, 0, rh / 2 + 0.012, sightZ + 0.06, gunMetal);
-    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.03, 16), glassMat); lens.position.set(0, rh / 2 + 0.045, sightZ + 0.166); g.add(lens);
-    g.userData.sightY = rh / 2 + 0.045;
+    // buffer tube with a skeleton stock hanging under it
+    cyl(g, 0.014, s.stock, 0, 0.006, z0 + s.stock / 2, gunMetal);
+    slab(g, [[U0 - 0.045, 0.03], [SB, 0.03], [SB - 0.012, 0.02], [SB - 0.012, -t - 0.045], [SB + 0.022, -t - 0.045], [U0 - 0.07, -0.02], [U0 - 0.045, -0.02]], rw * 0.78, accent, 0.005);
+    part(g, rw * 0.84, t + 0.07, 0.012, 0, (0.022 - t - 0.045) / 2, -SB + 0.016, gunDark);
   }
-  addArms(g, [0, -rh / 2 - 0.05, 0.05], [0, -0.04, recvEnd - hl * 0.5]);
+  // magazine
+  if (s.mag === 'stick') {
+    const len = def.model === 'smg' ? 0.2 : 0.17, bend = def.model === 'smg' ? 0 : 1, f = [], r = [];
+    for (let k = 0; k <= 5; k++) {
+      const q = k / 5, v = -t + 0.01 - q * len, o = (0.034 * q * q + 0.028 * q) * bend;
+      f.push([um + mh * 0.9 + o, v]); r.unshift([um - mh * 0.9 + o, v]);
+    }
+    slab(g, [...f, ...r], 0.03, gunPoly, 0.004);
+    slab(g, [[um - mh - 0.004, -t + 0.006], [um + mh + 0.004, -t + 0.006], [um + mh + 0.002, -t - 0.03], [um - mh - 0.002, -t - 0.036]], rw * 0.94, gunMetal, 0.003);
+  } else if (s.mag === 'box') {
+    // ammo box under the gun with a belt of rounds feeding over the top
+    slab(g, [[um - 0.06, -t + 0.004], [um + 0.06, -t + 0.004], [um + 0.06, -t - 0.115], [um - 0.055, -t - 0.115]], 0.1, accent, 0.006, 0.02);
+    part(g, 0.104, 0.012, 0.124, 0.02, -t - 0.045, -um, gunMetal);
+    for (let i = 0; i < 7; i++) cyl(g, 0.0045, 0.034, -rw / 2 - 0.004 - i * 0.0105, t - 0.004 - i * i * 0.0022, -um, brassMat, 0.0045, 8);
+    part(g, rw * 1.04, 0.022, rl * 0.3, 0, t - 0.004, -um - 0.02, gunMetal);
+  } else slab(g, [[um - 0.04, -t + 0.006], [um + 0.04, -t + 0.006], [um + 0.04, -t - 0.06], [um - 0.04, -t - 0.066]], 0.036, gunPoly, 0.004);
+  if (s.bipod) for (const sx of [-1, 1]) { cyl(g, 0.005, 0.17, sx * 0.024, -hh / 2 - 0.004, hgEnd + 0.1, gunMetal, 0.005, 8); part(g, 0.014, 0.008, 0.02, sx * 0.024, -hh / 2 - 0.004, hgEnd + 0.19, gunPoly); }
+  if (s.bolt) {
+    const k = cyl(g, 0.005, 0.05, 0.05, 0.004, z0 - 0.08, gunMetal, 0.005, 8); k.rotation.set(0, 1.2, 0);
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.011, 12, 8), gunPoly); knob.position.set(0.074, 0.004, z0 - 0.07); g.add(knob);
+  }
+  const sightZ = z0 - rl * 0.45, sy = t + 0.045;
+  if (s.sight === 'dot') {
+    // tube red dot on a rail mount
+    part(g, 0.034, 0.016, 0.06, 0, t + 0.022, sightZ, gunMetal);
+    ring(g, 0.0245, 0.0205, 0.078, 0, sy, sightZ, gunMetal);
+    ring(g, 0.026, 0.0205, 0.008, 0, sy, sightZ - 0.035, gunPoly);
+    part(g, 0.014, 0.01, 0.014, 0, sy + 0.027, sightZ, gunMetal);
+    pin(g, 0.007, 0.012, 0.028, sy, sightZ, gunMetal);
+    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.0205, 20), dotGlassMat); lens.position.set(0, sy, sightZ - 0.03); g.add(lens);
+    part(g, 0.004, 0.004, 0.001, 0, sy, sightZ - 0.028, lensMat);
+  } else {
+    // rifle scope: slim tube, flared objective, eyepiece, two turrets, two rings
+    cyl(g, 0.015, 0.3, 0, sy, sightZ, gunMetal);
+    cyl(g, 0.029, 0.07, 0, sy, sightZ - 0.15, gunMetal, 0.015);
+    ring(g, 0.031, 0.027, 0.04, 0, sy, sightZ - 0.2, gunMetal);
+    cyl(g, 0.016, 0.03, 0, sy, sightZ + 0.115, gunMetal, 0.024);
+    cyl(g, 0.024, 0.05, 0, sy, sightZ + 0.155, gunPoly);
+    const tur = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.024, 14), gunMetal); tur.position.set(0, sy + 0.024, sightZ - 0.01); g.add(tur);
+    pin(g, 0.012, 0.024, 0.024, sy, sightZ - 0.01, gunMetal);
+    for (const dz of [-0.07, 0.06]) { part(g, 0.03, 0.034, 0.018, 0, t + 0.02, sightZ + dz, gunMetal); cyl(g, 0.018, 0.018, 0, sy, sightZ + dz, gunMetal); }
+    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.022, 20), glassMat); lens.position.set(0, sy, sightZ + 0.1805); g.add(lens);
+    const front = new THREE.Mesh(new THREE.CircleGeometry(0.027, 20), glassMat); front.position.set(0, sy, sightZ - 0.215); front.rotation.y = Math.PI; g.add(front);
+  }
+  g.userData.sightY = sy;
+  addArms(g, [0, -t - 0.05, 0.05], [0, -0.04, recvEnd - hl * 0.5]);
   addFlash(g, barEnd - 0.05, 0.01);
   g.userData.adsZ = -0.2 - (sightZ - 0.0) * 0.4;
   g.userData.hip = new V3(0.17, -0.17, -0.36);
@@ -2250,26 +2347,92 @@ function makeTrooper(team) {
     hitboxes: [legL, legR, body, head, armMesh], real: false, trooper: true, char: `trooper${team}` };
 }
 // WWII fighters: Allied olive with black-and-white invasion stripes, Axis grey with yellow wingtips.
+const planeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.25 });
+const propDiscGeo = new THREE.CircleGeometry(1, 24);
+const propDiscMat = new THREE.MeshBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide });
+// Any geometry painted one colour, ready to merge with the other plane parts.
+function solid(geo, c, x = 0, y = 0, z = 0) {
+  const g = (geo.index ? geo.toNonIndexed() : geo).translate(x, y, z), col = new THREE.Color(c), n = g.attributes.position.count, arr = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { arr[i * 3] = col.r; arr[i * 3 + 1] = col.g; arr[i * 3 + 2] = col.b; }
+  g.deleteAttribute('uv'); g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+  return g;
+}
+const sbox = (w, h, d, x, y, z, c) => solid(new THREE.BoxGeometry(w, h, d), c, x, y, z);
+// A smooth skin over rings of [pos, halfA, halfB, centreA, centreB] strung along an axis (fuselages along z,
+// wings along x, fins along y). bands = [[from, to, colour]] repaint stretches; belly repaints the underside;
+// sq < 1 squares the rings off.
+function loft(axis, prof, col, { bands = [], belly = null, sq = 1, seg = 14 } = {}) {
+  const lo = prof[0][0], hi = prof.at(-1)[0];
+  const cuts = [...new Set([...prof.map((s) => s[0]), ...bands.flatMap((b) => [b[0], b[1]])])].filter((p) => p >= lo && p <= hi).sort((a, b) => a - b);
+  const at = (p) => {
+    let i = 0; while (i < prof.length - 2 && prof[i + 1][0] < p) i++;
+    const a = prof[i], b = prof[i + 1], q = (p - a[0]) / (b[0] - a[0] || 1);
+    return a.map((v, k) => v + (b[k] - v) * q);
+  };
+  const pos = [], cols = [], idx = [], c = new THREE.Color();
+  let n = 0;
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const mid = (cuts[i] + cuts[i + 1]) / 2, band = bands.find((b) => mid > b[0] && mid < b[1]);
+    for (const p of [cuts[i], cuts[i + 1]]) {
+      const [, ra, rb, ca, cb] = at(p);
+      for (let j = 0; j < seg; j++) {
+        const a = j / seg * Math.PI * 2, cs = Math.cos(a), sn = Math.sin(a);
+        const u = ca + ra * Math.sign(cs) * Math.abs(cs) ** sq, v = cb + rb * Math.sign(sn) * Math.abs(sn) ** sq;
+        if (axis === 'z') pos.push(u, v, p); else if (axis === 'x') pos.push(p, v, u); else pos.push(u, p, v);
+        c.set(band ? band[2] : belly !== null && axis !== 'y' && sn < -0.3 ? belly : col); cols.push(c.r, c.g, c.b);
+      }
+    }
+    for (let j = 0; j < seg; j++) { const a = n + j, b = n + (j + 1) % seg; idx.push(a, b, a + seg, b, b + seg, a + seg); }
+    n += seg * 2;
+  }
+  let geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  geo.setIndex(axis === 'z' ? idx : idx.reverse());
+  geo = mergeVertices(geo); geo.computeVertexNormals();
+  return geo.toNonIndexed();
+}
+// Wing outline for loft('x'): root chord c0 tapering to c1 at the tip, th thick, rising dih and swept back sweep.
+const wingProf = (half, c0, c1, th, z, y, dih = 0, sweep = 0) => [-1, 1].flatMap((s) => {
+  const tip = [[s * (half + 0.12), c1 * 0.2, th * 0.1, z + sweep, y + dih], [s * half, c1 / 2, th * 0.45, z + sweep, y + dih]];
+  return s < 0 ? [...tip, [0, c0 / 2, th, z, y]] : tip.reverse();
+});
+const mirror = (bands) => bands.flatMap(([a, b, c]) => [[a, b, c], [-b, -a, c]]);
+const stripes = (from, w) => [0xe8e8e0, 0x111111, 0xe8e8e0, 0x111111, 0xe8e8e0].map((c, i) => [from + i * w, from + (i + 1) * w, c]);
+const zcyl = (r, len, x, y, z, c, seg = 10) => solid(new THREE.CylinderGeometry(r, r, len, seg).rotateX(Math.PI / 2), c, x, y, z);
+// WWII fighters: an Allied Mustang in olive with invasion stripes and a red nose, an Axis 109 in grey with yellow nose and wingtips.
 const planeGeo = {};
 function planeGeos(team) {
   if (planeGeo[team]) return planeGeo[team];
-  const body = team === 0 ? 0x5a6340 : 0x6c7770, belly = team === 0 ? 0x8a8f7c : 0x9db0b8, dark = 0x222222, glass = 0x2a3a48;
+  const A = team === 0, body = A ? 0x5a6340 : 0x6c7770, belly = A ? 0x8a8f7c : 0x9db0b8, dark = 0x1c1c1c, glass = 0x2a3a48, yel = 0xd8b43a, nose = A ? 0xa8382a : yel;
   const parts = [
-    [0.95, 1.0, 6.4, 0, 0, 0.3, body], [1.1, 1.1, 1.2, 0, 0, -3.3, dark], [0.85, 0.3, 5.6, 0, -0.55, 0.4, belly],
-    [0.6, 0.45, 1.3, 0, 0.68, -0.6, glass], [10.6, 0.16, 1.9, 0, -0.25, -0.7, body], [3.8, 0.12, 0.95, 0, 0.12, 3.05, body],
-    [0.12, 1.3, 1.1, 0, 0.75, 3.05, body],
+    loft('z', [[-3.95, 0.04, 0.04, 0, 0], [-3.75, 0.22, 0.22, 0, 0], [-3.4, 0.37, 0.37, 0, 0], [-3.38, 0.46, 0.5, 0, 0], [-2.2, 0.5, 0.58, 0, 0],
+      [-0.6, 0.48, 0.62, 0, 0], [1, 0.4, 0.52, 0, 0.03], [2.6, 0.2, 0.32, 0, 0.12], [3.7, 0.04, 0.1, 0, 0.2]],
+    body, { belly, seg: 16, bands: [[-3.95, -3.4, nose], ...(A ? [] : [[-3.38, -2.7, yel]])] }),
+    loft('x', wingProf(5.3, 2.3, 1.1, 0.16, -0.7, -0.32, 0.3, A ? 0 : 0.15), body, { belly, seg: 12, bands: mirror(A ? stripes(2.05, 0.3) : [[4.4, 5.5, yel]]) }),
+    loft('x', wingProf(1.9, 1.1, 0.6, 0.06, 3.05, 0.15), body, { belly, seg: 10 }),
+    loft('y', [[0.15, 0.07, 0.65, 0, 2.95], [1.3, 0.04, 0.38, 0, 3.25], [1.5, 0.01, 0.1, 0, 3.35]], body, { seg: 10, bands: A ? [] : [[0.75, 1.5, yel]] }),
+    solid(new THREE.SphereGeometry(1, 14, 10).scale(0.3, A ? 0.37 : 0.3, A ? 0.95 : 0.8), glass, 0, 0.56, -0.5),
+    sbox(0.03, 0.4, 0.05, 0, 0.95, 0.7, dark), sbox(0.06, 0.34, 0.06, 0, -0.25, 3.1, dark), zcyl(0.1, 0.06, 0, -0.42, 3.12, dark).rotateZ(0),
   ];
-  if (team === 0) for (const [x, c] of [[2.2, 0xe8e8e0], [2.5, 0x111111], [2.8, 0xe8e8e0], [3.1, 0x111111], [3.4, 0xe8e8e0]]) parts.push([0.3, 0.17, 1.92, x, -0.25, -0.7, c], [0.3, 0.17, 1.92, -x, -0.25, -0.7, c]);
-  else parts.push([0.9, 0.17, 1.92, 4.85, -0.25, -0.7, 0xd8b43a], [0.9, 0.17, 1.92, -4.85, -0.25, -0.7, 0xd8b43a]);
-  return (planeGeo[team] = { body: colourBoxes(parts), prop: colourBoxes([[0.12, 2.8, 0.06, 0, 0, 0, dark], [2.8, 0.12, 0.06, 0, 0, 0, dark]]) });
+  for (const sx of [-1, 1]) {
+    for (let i = 0; i < 6; i++) parts.push(sbox(0.07, 0.06, 0.11, sx * 0.5, 0.14, -3.0 + i * 0.18, dark));   // exhaust stacks
+    for (const x of A ? [1.7, 1.95, 2.2] : [1.9]) parts.push(zcyl(0.035, 0.6, sx * x, -0.2, -1.95, dark, 8));  // wing guns
+    if (!A) parts.push(sbox(0.7, 0.13, 0.9, sx * 1.3, -0.46, -0.45, belly));                                   // underwing radiators
+  }
+  if (A) parts.push(loft('z', [[-0.1, 0.02, 0.02, 0, -0.56], [0.25, 0.27, 0.17, 0, -0.68], [1.4, 0.25, 0.15, 0, -0.64], [2, 0.04, 0.04, 0, -0.42]], belly, { seg: 10 }));
+  const n = A ? 4 : 3, blades = [];
+  for (let i = 0; i < n; i++) blades.push(loft('y', [[0.1, 0.06, 0.05, 0, 0], [0.55, 0.13, 0.025, 0, 0], [1.3, 0.08, 0.012, 0, 0], [1.42, 0.01, 0.004, 0, 0]], dark, { seg: 8, bands: [[1.2, 1.42, yel]] }).rotateY(0.4).rotateZ(i * Math.PI * 2 / n));
+  return (planeGeo[team] = { body: mergeGeometries(parts), prop: mergeGeometries(blades) });
 }
 function makePlane(team) {
   const G = planeGeos(team), g = new THREE.Group();
   g.rotation.order = 'YXZ';
-  const body = new THREE.Mesh(G.body, vcMat);
+  const body = new THREE.Mesh(G.body, planeMat);
   body.castShadow = true;
-  const prop = new THREE.Mesh(G.prop, vcMat);
-  prop.position.z = -3.95;
+  const prop = new THREE.Mesh(G.prop, planeMat);
+  prop.position.z = -3.6;
+  const disc = new THREE.Mesh(propDiscGeo, propDiscMat); disc.scale.setScalar(1.42); prop.add(disc);
   // An invisible box a bit bigger than the plane takes the bullets, so near misses still count.
   const hit = new THREE.Mesh(planeHitGeo, planeHitMat);
   hit.visible = false;
@@ -2312,28 +2475,34 @@ const lampGeo = new THREE.BoxGeometry(0.08, 0.16, 0.16);
 const LAMP_COLORS = [0x222222, 0xff2a1a, 0x2aff4a];
 function makeTransport(team) {
   if (!transportGeo[team]) {
-    const body = team === 0 ? 0x5a6340 : 0x4c5644, belly = team === 0 ? 0x8a8f7c : 0x93a7ae, dark = 0x222222, glass = 0x2a3a48, w = 0xe8e8e0, k = 0x111111;
+    const A = team === 0, body = A ? 0x5a6340 : 0x4c5644, belly = A ? 0x8a8f7c : 0x93a7ae, dark = 0x1c1c1c, glass = 0x2a3a48, k = 0x111111, yel = 0xd8b43a;
+    const tip = A ? [[-7.9, 0.1, 0.1, 0, -0.35], [-7.4, 0.6, 0.6, 0, -0.25]] : [[-7.9, 0.55, 0.55, 0, -0.1], [-7.6, 0.7, 0.7, 0, -0.1]];
     const parts = [
-      [2.4, 2.5, 13, 0, 0, 0.5, body], [2.0, 2.0, 2.2, 0, -0.1, -6.8, body], [1.7, 0.55, 0.9, 0, 0.85, -6.3, glass],
-      [1.5, 1.6, 3.4, 0, 0.35, 8.6, body], [2.2, 0.35, 12.5, 0, -1.25, 0.6, belly],
-      [24, 0.3, 3.4, 0, -0.75, -1.6, body], [8.4, 0.22, 2.2, 0, 0.6, 9.4, body], [0.22, 3.2, 2.6, 0, 2.1, 9.4, body],
-      [0.06, 1.75, 1.15, -1.22, -0.05, 3, k], // the open door on the left
+      loft('z', [...tip, [-6.2, 1.05, 1.12, 0, -0.05], [-4.6, 1.2, 1.25, 0, 0], [5, 1.2, 1.25, 0, 0], [7.6, 0.8, 0.95, 0, 0.3], [10.5, 0.1, 0.3, 0, 0.8]],
+        body, { belly, sq: A ? 0.75 : 0.5, seg: 20, bands: A ? stripes(4.15, 0.5) : [[5, 5.8, yel]] }),
+      sbox(1.5, 0.5, 1.1, 0, 0.78, -6.5, glass),
+      A ? loft('x', wingProf(12, 4.2, 1.6, 0.34, -1.6, -0.8, 0.9, 0.4), body, { belly, seg: 12, bands: mirror(stripes(6.15, 0.5)) })
+        : loft('x', wingProf(12.2, 4.4, 2.0, 0.4, -1.6, -0.85, 0.7), body, { belly, seg: 12 }),
+      loft('x', wingProf(4.2, 2.4, 1.3, 0.14, 9.3, 0.7), body, { belly, seg: 10 }),
+      loft('y', [[0.9, 0.14, 1.5, 0, 9.0], [3.4, 0.08, 0.8, 0, 9.7], [3.75, 0.02, 0.3, 0, 9.9]], body, { seg: 10 }),
+      sbox(0.3, 1.75, 1.15, -1.1, -0.05, 3, k), // the open door on the left
     ];
-    // Engine nacelles with a dark cowling ring at the front.
-    for (const x of team === 0 ? [-4.4, 4.4] : [-4.6, 0, 4.6]) parts.push(x ? [1.2, 1.2, 2.8, x, -0.55, -3.3, body] : [1.4, 1.4, 1.2, 0, -0.1, -8.3, body], [1.35, 1.35, 0.45, x, x ? -0.55 : -0.1, x ? -4.75 : -9.0, dark]);
-    if (team === 0) {
-      for (const [x, c] of [[6.4, w], [6.9, k], [7.4, w], [7.9, k], [8.4, w]]) parts.push([0.5, 0.32, 3.42, x, -0.75, -1.6, c], [0.5, 0.32, 3.42, -x, -0.75, -1.6, c]);
-      for (const [z, c] of [[4.4, w], [4.9, k], [5.4, w], [5.9, k], [6.4, w]]) parts.push([2.45, 2.55, 0.5, 0, 0, z, c]);
-    } else {
-      parts.push([2.45, 2.55, 0.8, 0, 0, 5.4, 0xd8b43a]);
-      for (const x of [-2.4, 2.4]) parts.push([0.25, 1.4, 0.25, x, -1.6, -2.2, dark], [0.35, 0.95, 0.95, x, -2.3, -2.2, dark]);
+    for (let z = -3.4; z < 4.5; z += 1.25) { parts.push(sbox(0.06, 0.4, 0.5, 1.19, 0.35, z, glass)); if (z < 1.8) parts.push(sbox(0.06, 0.4, 0.5, -1.19, 0.35, z, glass)); }
+    // Engine nacelles with a dark cowling and hub at the front.
+    for (const x of A ? [-4.4, 4.4] : [-4.6, 4.6]) parts.push(loft('z', [[-5.25, 0.03, 0.03, x, -0.6], [-4.95, 0.2, 0.2, x, -0.6], [-4.9, 0.68, 0.68, x, -0.6], [-3.6, 0.68, 0.68, x, -0.6], [-1.2, 0.3, 0.3, x, -0.7], [-0.2, 0.04, 0.04, x, -0.75]], body, { bands: [[-5.25, -4.3, dark]] }));
+    if (!A) {
+      parts.push(loft('z', [[-9.3, 0.03, 0.03, 0, -0.1], [-9.0, 0.2, 0.2, 0, -0.1], [-8.95, 0.72, 0.72, 0, -0.1], [-7.7, 0.72, 0.72, 0, -0.1]], body, { bands: [[-9.3, -8.4, dark]] }));
+      for (const x of [-2.4, 2.4]) parts.push(sbox(0.2, 1.4, 0.25, x, -1.6, -2.2, dark), solid(new THREE.CylinderGeometry(0.5, 0.5, 0.32, 14).rotateZ(Math.PI / 2), dark, x, -2.3, -2.2));
     }
-    transportGeo[team] = colourBoxes(parts);
+    transportGeo[team] = mergeGeometries(parts);
   }
   const g = new THREE.Group();
   g.rotation.order = 'YXZ';
-  const body = new THREE.Mesh(transportGeo[team], vcMat);
+  const body = new THREE.Mesh(transportGeo[team], planeMat);
   body.castShadow = true;
+  for (const [x, y, z] of team === 0 ? [[-4.4, -0.6, -5.05], [4.4, -0.6, -5.05]] : [[-4.6, -0.6, -5.05], [4.6, -0.6, -5.05], [0, -0.1, -9.1]]) {
+    const disc = new THREE.Mesh(propDiscGeo, propDiscMat); disc.scale.setScalar(1.6); disc.position.set(x, y, z); g.add(disc);
+  }
   // The jump light beside the door.
   const lamp = new THREE.Mesh(lampGeo, new THREE.MeshBasicMaterial({ color: LAMP_COLORS[0] }));
   lamp.position.set(-1.25, 0.95, 2.3);
