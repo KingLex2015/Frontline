@@ -3,7 +3,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { createPost, skyMaterial, bakeSkyEnv, normalFromTex, addReverb } from './fx.js';
+import { createPost, skyMaterial, bakeSkyEnv, normalFromTex, addReverb, wetGround, wetTime, createRain } from './fx.js';
 
 const $ = (id) => document.getElementById(id);
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -94,7 +94,8 @@ scene.add(muzzleLight);
 const sky = new THREE.Mesh(new THREE.SphereGeometry(450, 32, 16), skyMaterial());
 const post = createPost(renderer);
 const fxState = { time: 0, dt: 0, hurt: 0, lowHp: 0, ads: 0, sunDir: sky.material.uniforms.sunDir.value, sunCol: sky.material.uniforms.sunCol.value };
-let skyEnv = null, fxHp = 100, fxHurt = 0;
+let skyEnv = null, fxHp = 100, fxHurt = 0, rainSnd = null;
+const rain = createRain(scene);
 sky.renderOrder = -1;
 scene.add(sky);
 
@@ -294,6 +295,7 @@ function containerTex(hex) {
 const MATDEFS = {
   concrete: { tex: TEX.concrete, ts: 4, rough: 0.95, surf: 'dust' },
   asphalt:  { tex: TEX.asphalt, ts: 7, rough: 1, surf: 'dust' },
+  asphalt_wet: { tex: TEX.asphalt, ts: 7, rough: 1, surf: 'dust', wet: true },
   sand:     { tex: TEX.sand, ts: 8, rough: 1, surf: 'sand' },
   plaster:  { tex: TEX.plaster, ts: 3, rough: 0.95, surf: 'sand' },
   brick:    { tex: TEX.brick, ts: 2.5, rough: 0.9, surf: 'dust' },
@@ -307,7 +309,7 @@ const MATDEFS = {
   sandbag:  { tex: TEX.sandbag, ts: 1, rough: 1, surf: 'sand' },
   cloth_r:  { tex: TEX.cloth_r, ts: 1.5, rough: 1, surf: 'wood' },
   cloth_b:  { tex: TEX.cloth_b, ts: 1.5, rough: 1, surf: 'wood' },
-  lamp:     { color: 0xfff2cc, emissive: 0xffe6a8, ei: 4, surf: 'metal' },
+  lamp:     { color: 0xfff2cc, emissive: 0xffd9a0, ei: 9, surf: 'metal' },
   cont_red:    { tex: containerTex('#8f2a1f'), ts: 2.6, rough: 0.65, metal: 0.25, surf: 'metal' },
   cont_blue:   { tex: containerTex('#24467a'), ts: 2.6, rough: 0.65, metal: 0.25, surf: 'metal' },
   cont_green:  { tex: containerTex('#2f5e3a'), ts: 2.6, rough: 0.65, metal: 0.25, surf: 'metal' },
@@ -347,7 +349,9 @@ function mat(key) {
     emissive: d.emissive ?? 0x000000, emissiveIntensity: d.ei ?? 1,
     alphaTest: d.alpha ? 0.5 : 0, side: d.alpha ? THREE.DoubleSide : THREE.FrontSide,
   });
-  if (m.map && !d.alpha) m.normalMap = normalFromTex(m.map, d.bump ?? 1.6);
+  if (m.map && !d.alpha) m.normalMap = normalFromTex(m.map, d.bump);
+  if (d.wet) wetGround(m);
+  m.userData.rough = m.roughness;
   m.userData.ts = d.ts || 1;
   m.userData.surf = d.surf || 'dust';
   return (MATS[key] = m);
@@ -593,6 +597,14 @@ class Builder {
     this.box(x, 0, z, 0.18, h, 0.18, 'metal');
     this.box(x, h, z, 0.5, 0.18, 0.9, 'metal', { collide: false });
     this.box(x, h - 0.05, z, 0.35, 0.06, 0.7, 'lamp', { collide: false, ray: false, shadow: false });
+    this.glow(x, h - 0.4, z);
+  }
+  // On dark, rainy maps the lamps really light the ground around them.
+  glow(x, y, z) {
+    if (!this.lit) return;
+    const l = new THREE.PointLight(0xffc27a, 110, 26, 1.7);
+    l.position.set(x, y, z);
+    this.group.add(l);
   }
 }
 
@@ -600,10 +612,10 @@ const MAPS = {
   harbor: {
     name: 'HARBOR', desc: 'Container yard • mid-range lanes', half: 44,
     zones: { dom: [[-23.5, -6], [-4.5, 7.5], [32, 0]], hp: [[-4.5, 7.5], [5.5, -25.5], [32, 0], [0, 23], [-23.5, -6]] },
-    env: { sky: [0x4f86c9, 0xd8e4ee], fog: [0xc4d2de, 50, 200], sun: [0xfff0d8, 3.2, [45, 70, 30]], hemi: [0xbcd4ff, 0x5c5244, 1.1], exposure: 1.0 },
+    env: { sky: [0x33455a, 0x8f9da6], fog: [0x77868f, 28, 170], sun: [0xffc48a, 3.6, [45, 32, 30]], hemi: [0xa9bccd, 0x3c3630, 0.8], exposure: 0.95, cloud: 0.74, rain: true },
     build(b) {
       const r = mulberry32(1337);
-      b.ground('asphalt', 160);
+      b.ground('asphalt_wet', 160);
       b.perimeter(44, 5, 'concrete');
       const colors = ['red', 'blue', 'green', 'orange', 'gray', 'white'];
       const pick = () => colors[Math.floor(r() * colors.length)];
@@ -625,6 +637,7 @@ const MAPS = {
       for (const sx of [-5, 5]) for (const sz of [-3.5, 3.5]) b.box(sx, 0, sz, 0.8, 13, 0.8, 'paint_y');
       for (const sz of [-3.5, 3.5]) b.box(0, 13, sz, 12, 0.8, 1, 'paint_y');
       b.box(0, 13.8, 0, 2.2, 1.4, 8, 'paint_y');
+      for (const sx of [-4, 4]) { b.box(sx, 12.9, 0, 0.5, 0.1, 0.9, 'lamp', { collide: false, ray: false, shadow: false }); b.glow(sx, 12.4, 0); }
       b.crate(-1.5, 0.5, 1.2); b.crate(1.8, -0.8, 1.2, 2);
       b.decal(0, 0, 14, 0.3, 'hazard'); b.decal(0, 0, 0.3, 10, 'hazard');
       for (const [x, z] of [[-40, -40], [40, -40], [-40, 40], [40, 40], [0, -40], [0, 40]]) b.lamp(x, z);
@@ -1002,6 +1015,7 @@ function loadMap(id) {
   mapGroup = new THREE.Group();
   scene.add(mapGroup);
   const b = new Builder(mapGroup);
+  b.lit = !!def.env.rain;
   def.build(b);
   colliders = b.colliders;
   buildColliderGrid();
@@ -1024,6 +1038,10 @@ function loadMap(id) {
   const su = sky.material.uniforms;
   su.sunDir.value.set(...e.sun[2]).normalize(); su.sunCol.value.set(e.sun[0]); su.ground.value.set(e.hemi[1]); su.uCloud.value = e.cloud ?? 0.5;
   skyEnv = bakeSkyEnv(renderer, sky, skyEnv);
+  // Rain makes every surface slick, not just the ground.
+  rain.visible = !!e.rain;
+  for (const m of Object.values(MATS)) m.roughness = m.userData.rough * (e.rain ? 0.5 : 1);
+  syncRainSound();
   scene.environment = vmScene.environment = skyEnv.texture;
   renderer.toneMappingExposure = e.exposure;
   spawns = computeSpawns(def.half);
@@ -1049,6 +1067,19 @@ function initAudio() {
   noiseBuf = AC.createBuffer(1, AC.sampleRate, AC.sampleRate);
   const d = noiseBuf.getChannelData(0);
   for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  syncRainSound();
+}
+function syncRainSound() {
+  if (!AC || !noiseBuf) return;
+  if (rain.visible && !rainSnd) {
+    const src = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
+    src.buffer = noiseBuf; src.loop = true;
+    f.type = 'bandpass'; f.frequency.value = 2600; f.Q.value = 0.4;
+    g.gain.value = 0.06;
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start();
+    rainSnd = src;
+  } else if (!rain.visible && rainSnd) { rainSnd.stop(); rainSnd = null; }
 }
 function outNode(vol, pan) {
   const g = AC.createGain();
@@ -4706,7 +4737,8 @@ function frame(now) {
     sun.position.set(sx + sunOffset.x, sunOffset.y, sz + sunOffset.z);
   } else sun.target.position.set(0, 0, 0);
   const showVm = ui === 'hud' && P.alive && vmRoot.visible;
-  sky.material.uniforms.uTime.value = now / 1000;
+  sky.material.uniforms.uTime.value = wetTime.value = now / 1000;
+  if (rain.visible) rain.update(now / 1000, camera.position);
   if (settings.fx) {
     if (P.hp < fxHp) fxHurt = 1;
     fxHp = P.hp; fxHurt = Math.max(0, fxHurt - dt * 2.5);
