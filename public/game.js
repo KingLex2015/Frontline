@@ -547,10 +547,16 @@ class Builder {
   // A WWII vehicle ('jeep', 'kubel', 'truck', 'blitz', 'sherman', 'panzer'), turned in quarter turns.
   // It slides along z until it is clear of everything already built.
   ww2(kind, x, z, turns = 0) {
-    const [geo, w, h, l] = ww2Geo(kind), sw = turns % 2 ? l : w, sl = turns % 2 ? w : l, box = new THREE.Box3();
+    const tank = kind === 'sherman' || kind === 'panzer';
+    const [geo, w, h, l] = tank ? [null, ...tankGeos(kind).dims] : ww2Geo(kind), sw = turns % 2 ? l : w, sl = turns % 2 ? w : l, box = new THREE.Box3();
     for (let i = 0; i < 14; i++, z += 3) {
       box.set(new V3(x - sw / 2, 0.05, z - sl / 2), new V3(x + sw / 2, h, z + sl / 2));
       if (!this.colliders.some((c) => c.intersectsBox(box))) break;
+    }
+    if (tank) {
+      const k = makeTank(kind, x, z, turns * Math.PI / 2);
+      this.group.add(k.group); tankBox(k); this.meshes.push(...k.meshes); this.colliders.push(k.box); (this.tanks ||= []).push(k);
+      return;
     }
     const mesh = this.deco(geo, vcMat, x, 0, z, turns * Math.PI / 2);
     mesh.userData.surf = 'metal'; this.meshes.push(mesh); this.colliders.push(box);
@@ -957,7 +963,7 @@ const MAPS = {
   },
 };
 
-let mapGroup = null, colliders = [], mapMeshes = [], spawns = [], navPts = [], currentMap = null, mapHalf = 44, radarImg = null;
+let mapGroup = null, colliders = [], mapMeshes = [], tanks = [], spawns = [], navPts = [], currentMap = null, mapHalf = 44, radarImg = null;
 const sunOffset = new V3(), _sunLook = new V3();
 let shadowFollow = false;
 
@@ -987,6 +993,7 @@ function collidersIn(x0, z0, x1, z1) {
       for (const c of list) if (c._s !== stamp) { c._s = stamp; out.push(c); }
     }
   }
+  for (const k of tanks) if (k.driver !== null && k !== P.tank) out.push(k.box);
   return out;
 }
 const collidersNear = (x, z, r) => collidersIn(x - r, z - r, x + r, z + r);
@@ -1040,6 +1047,8 @@ function loadMap(id) {
   colliders = b.colliders;
   buildColliderGrid();
   mapMeshes = b.meshes;
+  tanks = b.tanks || [];
+  for (const rp of remotes.values()) rp.tank = null;
   mapHalf = def.half;
   const e = def.env;
   sky.material.uniforms.top.value.set(e.sky[0]);
@@ -2037,6 +2046,18 @@ function updateRemotes(dt, now) {
     if (dday) {
       setForm(rp, rp.formWant ?? FORM.ground);
       if (rp.form === FORM.ride) { rp.group.visible = false; continue; }
+      if (rp.form === FORM.tank) {
+        if (!rp.tank) claimTank(rp);
+        const k = rp.tank;
+        if (k) {
+          k.group.position.copy(rp.group.position); k.yaw = rp.yaw; k.pitch = rp.pitch;
+          const dt2 = (rp.roll || 0) - k.tyaw;
+          k.tyaw += Math.atan2(Math.sin(dt2), Math.cos(dt2)) * (1 - Math.exp(-16 * dt));
+          poseTank(k); tankBox(k);
+        }
+        rp.tag.visible = rp.group.position.distanceTo(camera.position) < 140;
+        continue;
+      }
       const dist = rp.group.position.distanceTo(camera.position);
       rp.group.visible = dist < (rp.form === FORM.plane ? 480 : 200);
       if (rp.form === FORM.plane) {
@@ -2072,6 +2093,7 @@ function aliveHitboxes() {
   const arr = [];
   for (const rp of remotes.values()) {
     if (!rp.alive || !rp.has || !rp.group.visible || !isEnemy(rp.id)) continue;
+    if (rp.form === FORM.tank) continue;
     if (rp.form === FORM.plane && rp.plane) arr.push(rp.plane.userData.hit); else arr.push(...rp.hitboxes);
   }
   return arr;
@@ -2101,7 +2123,8 @@ function spawnGrenade(kind, owner, pos, vel) {
   mesh.castShadow = true;
   mesh.position.copy(pos);
   scene.add(mesh);
-  grenades.push({ kind, owner, pos: pos.clone(), vel: vel.clone(), t: 0, mesh, lastClink: 0 });
+  grenades.push({ kind, owner, pos: pos.clone(), vel: vel.clone(), t: 0, mesh, lastClink: 0, shell: kind === 'bomb' && vel.lengthSq() > 1e4 });
+  if (grenades.at(-1).shell) mesh.scale.setScalar(0.5);
 }
 function explodeFrag(g) {
   const p = g.pos, up = new V3(0, 1, 0), spec = g.kind === 'bomb' ? BOMB : FRAG;
@@ -2127,9 +2150,9 @@ function explodeFrag(g) {
     for (const rp of remotes.values()) {
       if (!rp.alive || !rp.has || !isEnemy(rp.id) || rp.form === FORM.plane) continue;
       const chest = rp.group.position.clone().setY(rp.group.position.y + 1.0);
-      const d = src.distanceTo(chest);
-      if (d >= spec.radius || !segmentClear(src, chest)) continue;
-      net.send({ t: 'hit', target: rp.id, dmg: Math.round(spec.maxDmg * (1 - d / spec.radius)), head: false, w: g.kind });
+      const d = src.distanceTo(chest), tank = rp.form === FORM.tank;
+      if (d >= spec.radius || (!tank && !segmentClear(src, chest))) continue;
+      net.send({ t: 'hit', target: rp.id, dmg: Math.round(spec.maxDmg * (1 - d / spec.radius) * (tank ? TANK.blastMul : 1)), head: false, w: g.kind });
       hitSomeone = true;
     }
     if (hitSomeone) { showHitmarker(false); sfx.hit(); }
@@ -2170,9 +2193,9 @@ function updateGrenades(dt) {
   for (let i = grenades.length - 1; i >= 0; i--) {
     const g = grenades[i];
     g.t += dt;
-    const steps = 3, h = dt / steps;
+    const steps = g.shell ? Math.max(3, Math.ceil(g.vel.length() * dt / 0.3)) : 3, h = dt / steps;
     for (let s = 0; s < steps && !g.impact; s++) {
-      g.vel.y -= 20 * h;
+      g.vel.y -= (g.shell ? 5 : 20) * h;
       for (const a of ['x', 'y', 'z']) {
         const prev = g.pos[a];
         g.pos[a] += g.vel[a] * h;
@@ -2239,7 +2262,7 @@ const PLANE = { speed: 55, min: 36, max: 80, turn: 1.3, ceiling: 170, gunDmg: 16
 const BOMB = { radius: 10, maxDmg: 220 };
 const CHUTE = { y: 110, fall: 6, steer: 4.5 };
 const BOAT = { startX: -158, landX: -90, speed: 11 };
-const FORM = { ground: 0, chute: 1, plane: 2, boat: 3, ride: 4 }; // what a soldier currently is, sent as `r` in state; ride = in a troop carrier
+const FORM = { ground: 0, chute: 1, plane: 2, boat: 3, ride: 4, tank: 5 }; // what a soldier currently is, sent as `r` in state; ride = in a troop carrier
 const KILL_NAMES = { frag: 'FRAG', bomb: 'BOMB', mg: 'PLANE GUNS', crash: 'CRASHED' };
 const isDday = () => match?.mode === 'dday';
 const roleOf = (id) => pInfo(id)?.role || 'inf';
@@ -2477,22 +2500,120 @@ function ww2Geo(kind) {
       wheel(0.5, 0.34, s * 0.98, -2.5); wheel(0.5, 0.42, s * 0.94, 0.9); wheel(0.5, 0.42, s * 0.94, 2.1);
     }
     dims = [2.35, 2.7, 6.4];
-  } else {
-    const S = kind === 'sherman';
-    P.push(loft('z', [[-2.9, 0.02, 0.02, 0, 1.0], [-2.8, 0.95, 0.25, 0, 0.95], [-1.8, 1.0, 0.45, 0, 1.15], [2.5, 1.0, 0.45, 0, 1.15], [2.8, 0.95, 0.3, 0, 1.05], [2.85, 0.02, 0.02, 0, 1.0]], body, { sq: 0.4 }),
-      S ? loft('y', [[1.55, 0.02, 0.02, 0, -0.1], [1.6, 0.85, 1.0, 0, -0.1], [2.2, 0.75, 0.9, 0, -0.05], [2.3, 0.3, 0.3, 0, 0], [2.32, 0.02, 0.02, 0, 0]], body, { sq: 0.8, seg: 16 })
-        : loft('y', [[1.55, 0.02, 0.02, 0, 0], [1.6, 0.9, 1.15, 0, 0], [2.15, 0.8, 1.05, 0, 0.05], [2.2, 0.02, 0.02, 0, 0.05]], body, { sq: 0.4, seg: 16 }),
-      zcyl(0.075, S ? 2.4 : 3.2, 0, 1.92, S ? -2.1 : -2.6, body, 10), sbox(0.7, 0.5, 0.35, 0, 1.92, -1.05, body),
-      solid(new THREE.CylinderGeometry(0.3, 0.3, 0.14, 12), body, S ? -0.3 : 0, S ? 2.3 : 2.25, 0.2));
-    if (!S) P.push(zcyl(0.11, 0.3, 0, 1.92, -4.15, dark, 10));
-    for (const s of [-1, 1]) {
-      P.push(loft('z', [[-3, 0.02, 0.02, s * 1.2, 0.5], [-2.95, 0.28, 0.3, s * 1.2, 0.62], [-2.4, 0.28, 0.5, s * 1.2, 0.5], [2.4, 0.28, 0.5, s * 1.2, 0.5], [2.95, 0.28, 0.3, s * 1.2, 0.62], [3, 0.02, 0.02, s * 1.2, 0.5]], 0x222220, { sq: 0.45 }));
-      for (let z = -2.1; z <= 2.2; z += 0.84) P.push(solid(new THREE.CylinderGeometry(0.3, 0.3, 0.08, 12).rotateZ(Math.PI / 2), body, s * 1.47, 0.36, z));
-    }
-    if (S) star(0.45, 0, 1.605, 1.6);
-    dims = [2.95, 2.35, 6];
   }
   return (ww2Cache[kind] = [lift(mergeGeometries(P), 1.8), ...dims]);
+}
+// Drivable WWII tanks, built to the real proportions and split into hull, turret and gun so the turret can turn:
+// an M4A1 Sherman (cast hull, three VVSS bogies a side, 75 mm M3, .50 cal on the roof) and a Panzer IV Ausf. H
+// (eight small road wheels a side, Schürzen skirts on hull and turret, long 7.5 cm KwK 40 with its muzzle brake).
+const tankGeo = {};
+function tankGeos(kind) {
+  if (tankGeo[kind]) return tankGeo[kind];
+  const S = kind === 'sherman', body = S ? 0x57603c : 0x9c8a5a, body2 = S ? 0x4d5535 : 0x8a7a50, dk = 0x1c1c1a, trk = 0x2b2723, rub = 0x151515,
+    steel = 0x3a3a36, wood = 0x6b4e2e, white = 0xe8e8e0, H = [], T = [], G = [];
+  const xcyl = (r, len, x, y, z, c, seg = 16) => solid(new THREE.CylinderGeometry(r, r, len, seg).rotateZ(Math.PI / 2), c, x, y, z);
+  const ycyl = (r, len, x, y, z, c, seg = 16) => solid(new THREE.CylinderGeometry(r, r, len, seg), c, x, y, z);
+  const rbox = (w, h, d, x, y, z, c, rx) => solid(new THREE.BoxGeometry(w, h, d).rotateX(rx), c, x, y, z);
+  const ball = (r, x, y, z, c) => solid(new THREE.SphereGeometry(r, 10, 8), c, x, y, z);
+  const wheel = (x, y, z, r) => H.push(xcyl(r, 0.2, x, y, z, rub), xcyl(r * 0.72, 0.23, x, y, z, body), xcyl(r * 0.25, 0.3, x, y, z, body2, 8));
+  // A track of separate links wrapped round the sprocket (front), the road wheels and the idler (rear).
+  const track = (x, w, zs, ys, rs, zi, yi, ri, z0, z1) => {
+    const pts = [];
+    for (let a = 0; a <= 0.8; a += 0.1) pts.push([zs - rs * Math.sin(a * Math.PI), ys + rs * Math.cos(a * Math.PI)]);
+    pts.push([z0, 0.03], [z1, 0.03]);
+    for (let a = 0.8; a >= -0.01; a -= 0.1) pts.push([zi + ri * Math.sin(a * Math.PI), yi + ri * Math.cos(a * Math.PI)]);
+    pts.push(pts[0]);
+    let carry = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [za, ya] = pts[i], dz = pts[i + 1][0] - za, dy = pts[i + 1][1] - ya, len = Math.hypot(dz, dy);
+      for (let d = carry; d < len; d += 0.15) H.push(rbox(w, 0.05, 0.13, x, ya + dy * d / len, za + dz * d / len, trk, Math.atan2(-dy, dz)));
+      carry = (carry - len) % 0.15; if (carry < 0) carry += 0.15;
+    }
+  };
+  const gear = (x, zs, ys, zi, yi) => {
+    for (const o of [-0.13, 0.13]) H.push(xcyl(0.31, 0.05, x + o, ys, zs, steel, 13));
+    H.push(xcyl(0.2, 0.34, x, ys, zs, body), xcyl(0.09, 0.48, x, ys, zs, body2, 8), xcyl(0.27, 0.3, x, yi, zi, body), xcyl(0.08, 0.4, x, yi, zi, body2, 8));
+  };
+  const star = (r, x, y, z, side) => {
+    const s = new THREE.Shape();
+    for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5, q = i % 2 ? r * 0.4 : r; s[i ? 'lineTo' : 'moveTo'](Math.sin(a) * q, Math.cos(a) * q); }
+    const g = new THREE.ShapeGeometry(s);
+    return solid(side ? g.rotateY(side * Math.PI / 2) : g.rotateX(-Math.PI / 2), white, x, y, z);
+  };
+  let dims, piv, trun, muz;
+  if (S) {
+    H.push(sbox(1.6, 0.62, 5.1, 0, 0.74, 0.1, body), xcyl(0.42, 1.62, 0, 0.78, -2.5, body), xcyl(0.46, 0.05, -0.27, 0.78, -2.5, body2), xcyl(0.46, 0.05, 0.27, 0.78, -2.5, body2),
+      loft('z', [[-2.72, 0.02, 0.02, 0, 1.0], [-2.66, 1.2, 0.1, 0, 1.04], [-1.55, 1.3, 0.37, 0, 1.37], [1.5, 1.3, 0.37, 0, 1.37], [2.55, 1.27, 0.3, 0, 1.32], [2.72, 0.02, 0.02, 0, 1.2]], body, { sq: 0.5, seg: 16 }),
+      ball(0.13, 0.62, 1.24, -2.3, body), zcyl(0.025, 0.5, 0.62, 1.24, -2.6, dk, 8),
+      sbox(1.4, 0.03, 0.5, 0, 1.75, 1.15, 0x30342a), sbox(0.9, 0.1, 0.2, 0, 0.85, 2.8, dk), xcyl(0.16, 1.5, 0, 1.8, 2.1, 0x77714e, 10),
+      sbox(0.04, 0.04, 1.0, -1.32, 1.5, 0.5, wood), sbox(0.03, 0.16, 0.22, -1.32, 1.5, -0.1, steel), sbox(0.05, 0.05, 0.9, 1.32, 1.52, 0.9, steel),
+      star(0.3, -1.315, 1.38, -0.5, -1), star(0.3, 1.315, 1.38, -0.5, 1), star(0.34, 0, 1.752, 1.75, 0));
+    for (let i = 0; i < 6; i++) H.push(rbox(0.16, 0.06, 0.38, -0.45 + i * 0.18, 1.5, -2.08, trk, -0.5));
+    for (const s of [-1, 1]) {
+      H.push(sbox(0.52, 0.14, 0.55, s * 0.62, 1.76, -1.5, body), sbox(0.4, 0.03, 0.36, s * 0.62, 1.845, -1.45, body2), sbox(0.12, 0.06, 0.08, s * 0.62, 1.88, -1.66, dk),
+        ball(0.07, s * 0.98, 1.34, -2.42, 0xe8e2c0), sbox(0.08, 0.14, 0.12, s * 0.55, 0.6, -2.95, steel), ycyl(0.14, 0.4, s * 0.55, 1.0, 2.84, body, 12), ycyl(0.06, 0.03, s * 0.9, 1.755, 0.7, body2, 8));
+      const x = s * 1.09;
+      track(x, 0.42, -2.5, 0.66, 0.31, 2.45, 0.58, 0.28, -1.85, 1.85);
+      gear(x, -2.5, 0.66, 2.45, 0.58);
+      for (const zc of [-1.42, 0, 1.42]) {
+        wheel(x, 0.3, zc - 0.37, 0.255); wheel(x, 0.3, zc + 0.37, 0.255);
+        H.push(sbox(0.3, 0.5, 0.26, x, 0.62, zc, body), rbox(0.26, 0.09, 0.44, x, 0.42, zc - 0.2, body, 0.5), rbox(0.26, 0.09, 0.44, x, 0.42, zc + 0.2, body, -0.5),
+          xcyl(0.09, 0.3, x, 0.82, zc + 0.3, steel, 10), sbox(0.3, 0.04, 0.5, x, 0.89, zc - 0.1, body2));
+      }
+    }
+    T.push(loft('y', [[-0.02, 0.02, 0.02, 0, 0.1], [0, 0.8, 0.95, 0, 0.1], [0.25, 0.86, 1.03, 0, 0.12], [0.55, 0.8, 0.97, 0, 0.14], [0.72, 0.6, 0.75, 0, 0.16], [0.76, 0.02, 0.02, 0, 0.16]], body, { sq: 0.85, seg: 18 }),
+      sbox(1.1, 0.6, 0.14, 0, 0.36, -0.9, body), ycyl(0.33, 0.08, 0.3, 0.78, 0.25, body), sbox(0.27, 0.03, 0.5, 0.16, 0.83, 0.25, body2), sbox(0.27, 0.03, 0.5, 0.44, 0.83, 0.25, body2),
+      ycyl(0.12, 0.05, -0.32, 0.76, -0.3, body2, 10), sbox(0.14, 0.07, 0.1, -0.35, 0.78, 0.3, dk),
+      ycyl(0.025, 0.36, 0.3, 0.96, 0.72, steel, 6), sbox(0.08, 0.1, 0.45, 0.3, 1.16, 0.62, dk), zcyl(0.022, 1.0, 0.3, 1.17, -0.1, dk, 6), sbox(0.12, 0.16, 0.26, 0.17, 1.1, 0.62, body),
+      ycyl(0.012, 1.7, -0.5, 1.5, 0.9, dk, 5), star(0.24, -0.865, 0.3, 0.25, -1), star(0.24, 0.865, 0.3, 0.25, 1));
+    G.push(xcyl(0.3, 0.9, 0, 0, -0.14, body, 14), sbox(0.95, 0.52, 0.1, 0, 0, -0.3, body), zcyl(0.085, 0.5, 0, 0, -0.55, body, 12), zcyl(0.055, 2.3, 0, 0, -1.6, body, 12),
+      zcyl(0.064, 0.06, 0, 0, -2.73, dk, 12), zcyl(0.02, 0.3, 0.27, 0.02, -0.45, dk, 6));
+    dims = [2.62, 2.74, 5.84]; piv = [1.74, -0.3]; trun = [0.36, -0.82]; muz = 2.8;
+  } else {
+    const rust = 0x4a3a2c, grn = 0x5c6642;
+    H.push(sbox(1.8, 0.62, 5.5, 0, 0.76, 0.05, body), sbox(1.8, 0.5, 0.3, 0, 0.82, -2.8, body), rbox(1.8, 0.05, 1.05, 0, 1.12, -2.2, body, -0.17),
+      sbox(2.36, 0.5, 3.0, 0, 1.37, -0.2, body), sbox(2.36, 0.4, 1.6, 0, 1.32, 2.1, body),
+      sbox(0.4, 0.12, 0.04, -0.55, 1.42, -1.72, dk), ball(0.14, 0.6, 1.38, -1.72, body), zcyl(0.022, 0.4, 0.6, 1.38, -1.95, dk, 6),
+      xcyl(0.17, 1.4, 0, 0.85, 3.05, rust, 12), xcyl(0.1, 0.5, -0.6, 1.15, 3.0, rust, 10),
+      sbox(0.14, 0.14, 0.55, 1.3, 1.17, 1.9, steel), ball(0.07, -1.0, 1.2, -2.5, dk), ycyl(0.012, 1.8, 1.1, 2.4, 1.2, dk, 5),
+      sbox(0.04, 0.04, 1.1, -1.3, 1.13, 0.6, wood), sbox(0.5, 0.1, 0.3, -1.25, 1.15, -1.9, body2));
+    for (let i = 0; i < 7; i++) H.push(rbox(0.2, 0.06, 0.42, -0.72 + i * 0.24, 1.17, -2.2, trk, -0.17));
+    for (const s of [-1, 1]) {
+      H.push(sbox(0.56, 0.04, 5.9, s * 1.17, 1.08, 0.05, body2), sbox(0.8, 0.02, 0.6, s * 0.5, 1.53, 2.0, body2), sbox(0.03, 0.04, 4.6, s * 1.52, 1.5, 0.1, body2));
+      for (let i = 0; i < 4; i++) H.push(sbox(0.03, 0.05, 1.2, s * 1.19, 1.24 + i * 0.07, 2.1, dk));
+      const x = s * 1.14;
+      track(x, 0.4, -2.62, 0.7, 0.32, 2.6, 0.62, 0.27, -2.0, 1.9);
+      gear(x, -2.62, 0.7, 2.6, 0.62);
+      for (let i = 0; i < 8; i++) {
+        wheel(x, 0.27, -1.95 + i * 0.55, 0.235);
+        if (i % 2 === 0) H.push(sbox(0.24, 0.12, 0.62, x, 0.5, -1.675 + i * 0.55, body), xcyl(0.1, 0.3, x, 0.87, -1.5 + i * 0.525, steel, 10));
+      }
+      // Schürzen: thin skirt plates hung from a rail (one has gone missing, as they often did).
+      for (let i = 0; i < 5; i++) {
+        const z = -1.74 + i * 0.92;
+        H.push(sbox(0.36, 0.03, 0.04, s * 1.36, 1.5, z, body2));
+        if (s === 1 && i === 3) continue;
+        H.push(sbox(0.02, 0.95, 0.88, s * 1.53, 1.03, z, i % 2 ? body : body2));
+        if (i === 1 || i === 4) H.push(rbox(0.026, 0.6, 0.22, s * 1.533, 1.05, z, grn, 0.5));
+        if (i === 2) H.push(sbox(0.03, 0.36, 0.12, s * 1.54, 1.1, z, white), sbox(0.03, 0.12, 0.36, s * 1.54, 1.1, z, white),
+          sbox(0.036, 0.3, 0.06, s * 1.542, 1.1, z, dk), sbox(0.036, 0.06, 0.3, s * 1.542, 1.1, z, dk));
+      }
+    }
+    T.push(loft('y', [[-0.02, 0.02, 0.02, 0, 0.1], [0, 0.82, 1.0, 0, 0.1], [0.42, 0.72, 0.9, 0, 0.14], [0.45, 0.02, 0.02, 0, 0.14]], body, { sq: 0.3, seg: 16 }),
+      sbox(0.9, 0.4, 0.1, 0, 0.22, -0.9, body), ycyl(0.33, 0.26, 0, 0.56, 0.55, body), ycyl(0.34, 0.05, 0, 0.6, 0.55, dk), ycyl(0.26, 0.03, 0, 0.705, 0.55, body2),
+      sbox(0.5, 0.03, 0.4, -0.4, 0.46, -0.2, body2), sbox(0.5, 0.03, 0.4, 0.4, 0.46, -0.2, body2));
+    // Turret skirts: flat plates standing off the sides and back.
+    for (let i = -5; i <= 5; i++) {
+      const a = i * 0.45;
+      T.push(solid(new THREE.BoxGeometry(0.57, 0.5, 0.02).rotateY(a), i % 2 ? body : body2, Math.sin(a) * 1.25, 0.28, 0.1 + Math.cos(a) * 1.25));
+      if (i % 2 === 0) T.push(solid(new THREE.BoxGeometry(0.04, 0.03, 0.4).rotateY(a), body2, Math.sin(a) * 1.05, 0.4, 0.1 + Math.cos(a) * 1.05));
+    }
+    G.push(sbox(0.62, 0.38, 0.22, 0, 0, -0.2, body), zcyl(0.1, 0.7, 0, 0, -0.6, body, 12), zcyl(0.05, 2.9, 0, 0, -2.2, body, 12),
+      zcyl(0.095, 0.16, 0, 0, -3.5, dk, 12), zcyl(0.085, 0.12, 0, 0, -3.72, dk, 12), zcyl(0.055, 0.45, 0, 0, -3.6, dk, 10), zcyl(0.02, 0.3, 0.28, 0, -0.45, dk, 6));
+    dims = [3.1, 2.68, 6.1]; piv = [1.62, -0.35]; trun = [0.22, -0.85]; muz = 3.85;
+  }
+  const m = (a) => lift(mergeGeometries(a), 1.8);
+  return (tankGeo[kind] = { hull: m(H), turret: m(T), gun: m(G), dims, piv, trun, muz });
 }
 // WWII fighters: an Allied Mustang in olive with invasion stripes and a red nose, an Axis 109 in grey with yellow nose and wingtips.
 const planeGeo = {};
@@ -2634,6 +2755,7 @@ const bombMat = new THREE.MeshStandardMaterial({ color: 0x3a3d33, roughness: 0.6
 function setForm(rp, form) {
   if (rp.form === form) return;
   rp.form = form;
+  if (form !== FORM.tank && rp.tank) releaseTank(rp, false);
   const team = teamOf(rp.id) === 1 ? 1 : 0;
   if (form === FORM.plane && !rp.plane) {
     rp.plane = makePlane(team);
@@ -2642,7 +2764,7 @@ function setForm(rp, form) {
   }
   if (form === FORM.chute && !rp.chute) { rp.chute = makeChute(team); rp.group.add(rp.chute); }
   if (form === FORM.boat && !rp.boat) { rp.boat = makeBoat(); rp.boat.position.y = -0.35; rp.group.add(rp.boat); }
-  if (rp.hips) rp.hips.visible = rp.torso.visible = form !== FORM.plane;
+  if (rp.hips) rp.hips.visible = rp.torso.visible = form !== FORM.plane && form !== FORM.tank;
   if (rp.plane) rp.plane.visible = form === FORM.plane;
   if (rp.chute) rp.chute.visible = form === FORM.chute;
   if (rp.boat) { rp.boat.visible = form === FORM.boat; rp.boat.userData.ramp.rotation.x = 0; }
@@ -2663,6 +2785,166 @@ function bigBoom(p, scale = 1) {
   if (dist < 45) P.shake = Math.max(P.shake, (1 - dist / 45) * 1.2);
 }
 
+// ---- Drivable tanks ----
+// Small arms bounce off (the hull is plain map metal); shells, bombs and grenades are what hurt the crew.
+const TANK = { speed: 10.5, turn: 0.9, slew: 0.75, reloadMs: 3500, shell: 150, hitMul: 0.1, blastMul: 0.6 };
+const tankName = (k) => (k.kind === 'sherman' ? 'M4A1 SHERMAN' : 'PANZER IV');
+function makeTank(kind, x, z, yaw) {
+  const g = tankGeos(kind), group = new THREE.Group(), turret = new THREE.Group(), gunP = new THREE.Group();
+  const k = { kind, team: kind === 'sherman' ? 0 : 1, group, turret, gunP, spec: g, home: [x, z, yaw], yaw, tyaw: yaw, pitch: 0, speed: 0, driver: null,
+    nextShot: 0, recoil: 0, box: new THREE.Box3(), meshes: [] };
+  for (const [geo, parent] of [[g.hull, group], [g.turret, turret], [g.gun, gunP]]) {
+    const m = new THREE.Mesh(geo, vcMat);
+    m.castShadow = m.receiveShadow = true; m.userData = { surf: 'metal', tank: k };
+    parent.add(m); k.meshes.push(m);
+  }
+  turret.position.set(0, g.piv[0], g.piv[1]); gunP.position.set(0, g.trun[0], g.trun[1]);
+  turret.add(gunP); group.add(turret);
+  group.position.set(x, 0, z);
+  poseTank(k);
+  return k;
+}
+function poseTank(k) { k.group.rotation.y = k.yaw; k.turret.rotation.y = k.tyaw - k.yaw; k.gunP.rotation.x = k.pitch; k.meshes[2].position.z = k.recoil; }
+function tankBox(k) {
+  const p = k.group.position, [w, h, l] = k.spec.dims, s = Math.abs(Math.sin(k.yaw)), c = Math.abs(Math.cos(k.yaw)), hx = (c * w + s * l) / 2, hz = (s * w + c * l) / 2;
+  k.box.set(new V3(p.x - hx, p.y + 0.05, p.z - hz), new V3(p.x + hx, p.y + h, p.z + hz));
+}
+// A crewed tank leaves the collider grid (its box is added back per query, see collidersIn); a parked one sits in it.
+function mountTank(k, id) {
+  k.driver = id;
+  const i = colliders.indexOf(k.box);
+  if (i >= 0) { colliders.splice(i, 1); buildColliderGrid(); }
+}
+function parkTank(k, home) {
+  k.driver = null; k.speed = 0; k.recoil = 0;
+  if (home) { k.group.position.set(k.home[0], 0, k.home[1]); k.yaw = k.tyaw = k.home[2]; k.pitch = 0; }
+  poseTank(k); tankBox(k);
+  if (!colliders.includes(k.box)) { colliders.push(k.box); buildColliderGrid(); }
+}
+function claimTank(rp) {
+  const team = teamOf(rp.id) === 1 ? 1 : 0, p = rp.group.position;
+  let best = null, bd = Infinity;
+  for (const k of tanks) {
+    const d = k.group.position.distanceToSquared(p);
+    if (k.team === team && k.driver === null && d < bd) { best = k; bd = d; }
+  }
+  if (best) { rp.tank = best; mountTank(best, rp.id); }
+}
+function releaseTank(rp, home) {
+  const k = rp.tank;
+  rp.tank = null;
+  if (k && k.driver === rp.id) parkTank(k, home);
+}
+function tankNear() {
+  if (P.tank || P.form !== FORM.ground || P.ride || P.jump) return null;
+  const team = myTeam() === 1 ? 1 : 0;
+  for (const k of tanks) {
+    const p = k.group.position;
+    if (k.team === team && k.driver === null && (p.x - P.pos.x) ** 2 + (p.z - P.pos.z) ** 2 < 30 && Math.abs(p.y - P.pos.y) < 3.5) return k;
+  }
+  return null;
+}
+function enterTank(k) {
+  mountTank(k, myId);
+  P.tank = k; P.form = FORM.tank;
+  P.pos.copy(k.group.position); P.vel.set(0, 0, 0);
+  P.yaw = k.tyaw; P.pitch = 0; P.crouch = false; P.slideT = 0; P.adsT = 0; P.reloadUntil = 0;
+  k.aim = null; k.aimAt = 0;
+  showViewmodel();
+  $('scope').classList.add('hidden'); $('ammo').classList.add('hidden'); $('flighthud').classList.remove('hidden');
+  playNoise(0.25, 300, 0.3);
+  sendState(true);
+}
+function exitTank(dead) {
+  const k = P.tank;
+  if (!k) return;
+  P.tank = null; P.form = FORM.ground;
+  if (dead) bigBoom(k.group.position, 1.2);
+  parkTank(k, dead);
+  $('ammo').classList.remove('hidden'); $('flighthud').classList.add('hidden');
+  if (dead) return;
+  // Climb out beside the hull, or onto the roof when both sides and the back are blocked.
+  const p = k.group.position, f = fwdOf(k.yaw), spots = [[f.z * 3.6, -f.x * 3.6], [-f.z * 3.6, f.x * 3.6], [-f.x * 4.8, -f.z * 4.8]];
+  const s = spots.find(([dx, dz]) => freeAt(p.x + dx, p.y + 0.1, p.z + dz, 1.8));
+  if (s) P.pos.set(p.x + s[0], p.y + 0.1, p.z + s[1]); else P.pos.set(p.x, p.y + k.spec.dims[1] + 0.1, p.z);
+  P.vel.set(0, 0, 0); P.viewY = P.pos.y;
+  showViewmodel();
+  sendState(true);
+}
+function tankFits(k, x, y, z, yaw) {
+  if (Math.abs(x) > mapHalf - 4 || Math.abs(z) > mapHalf - 4) return false;
+  const s = Math.sin(yaw), c = Math.cos(yaw), hw = k.spec.dims[0] / 2 - 0.3, hl = k.spec.dims[2] / 2 - 0.3;
+  for (const [a, b] of [[-hw, -hl], [hw, -hl], [-hw, hl], [hw, hl], [0, -hl], [0, hl], [-hw, -1], [hw, -1], [-hw, 1], [hw, 1]]) {
+    if (!freeAt(x + a * c + b * s, y + 0.65, z - a * s + b * c, 1.3)) return false;
+  }
+  return true;
+}
+function updateTank(dt, now, canMove) {
+  const k = P.tank, g = k.spec;
+  const thr = canMove ? (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0) : 0;
+  const steer = canMove ? (keys.has('KeyA') ? 1 : 0) - (keys.has('KeyD') ? 1 : 0) : 0;
+  k.speed = damp(k.speed, thr > 0 ? TANK.speed : thr < 0 ? -TANK.speed * 0.4 : 0, thr ? 1.1 : 2.5, dt);
+  // Hull: the tracks turn it on the spot, and it stops dead against anything solid.
+  const nyaw = k.yaw + steer * TANK.turn * dt;
+  if (steer && tankFits(k, P.pos.x, P.pos.y, P.pos.z, nyaw)) { k.yaw = nyaw; k.tyaw += steer * TANK.turn * dt; }
+  const f = fwdOf(k.yaw);
+  if (Math.abs(k.speed) > 0.05 && !tankFits(k, P.pos.x + f.x * k.speed * dt, P.pos.y, P.pos.z + f.z * k.speed * dt, k.yaw)) k.speed = 0;
+  P.vel.x = f.x * k.speed; P.vel.z = f.z * k.speed;
+  physicsStep(P, 1.6, dt);
+  k.group.position.copy(P.pos);
+  // Chase camera behind the hull; the turret slews toward whatever the crosshair is on.
+  P.pitch = clamp(P.pitch, -0.4, 0.5);
+  const aim = fwdOf(P.yaw, P.pitch);
+  camera.position.lerp(P.pos.clone().addScaledVector(fwdOf(P.yaw), -9.5).add(new V3(0, 4.6, 0)), 1 - Math.exp(-10 * dt));
+  camera.lookAt(camera.position.clone().addScaledVector(aim, 50));
+  if (now > k.aimAt || !k.aim) {
+    k.aimAt = now + 100;
+    tankRay.set(camera.position, aim); tankRay.far = 400;
+    const hit = tankRay.intersectObjects(mapMeshes, false).find((h) => h.object.userData.tank !== k && h.distance > 11);
+    k.aim = hit ? hit.point : camera.position.clone().addScaledVector(aim, 250);
+  }
+  const d = k.aim.clone().sub(P.pos).setY(k.aim.y - P.pos.y - g.piv[0] - g.trun[0]);
+  let dy = Math.atan2(-d.x, -d.z) - k.tyaw;
+  dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+  k.tyaw += clamp(dy, -TANK.slew * dt, TANK.slew * dt);
+  const wantPitch = clamp(Math.atan2(d.y, Math.hypot(d.x, d.z)), -0.14, 0.35);
+  k.pitch += clamp(wantPitch - k.pitch, -0.5 * dt, 0.5 * dt);
+  k.recoil = damp(k.recoil, 0, 5, dt);
+  if (mouseL && canMove && now >= k.nextShot) {
+    k.nextShot = now + TANK.reloadMs; k.recoil = 0.4;
+    poseTank(k); k.group.updateMatrixWorld(true);
+    const dir = fwdOf(k.tyaw, k.pitch), o = k.gunP.getWorldPosition(new V3()).addScaledVector(dir, g.muz + 0.3), vel = dir.clone().multiplyScalar(TANK.shell);
+    const r2 = (v) => Math.round(v * 100) / 100;
+    spawnGrenade('bomb', myId, o, vel);
+    net.send({ t: 'throw', k: 'bomb', p: [r2(o.x), r2(o.y), r2(o.z)], v: [r2(vel.x), r2(vel.y), r2(vel.z)] });
+    const fl = new THREE.Sprite(new THREE.SpriteMaterial({ map: flashTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+    fl.position.copy(o); fl.scale.set(4.5, 4.5, 1);
+    scene.add(fl); booms.push({ s: fl, t: 0 });
+    emit(o, dir, 'dust', 30);
+    sfx.boom(5, false);
+    P.shake = Math.max(P.shake, 0.9);
+  }
+  poseTank(k); tankBox(k);
+  const sh = P.shake * 0.03;
+  P.shake = damp(P.shake, 0, 3, dt);
+  camera.rotation.x += rand(-sh, sh); camera.rotation.y += rand(-sh, sh);
+  if (Math.abs(camera.fov - 75) > 0.01) { camera.fov = 75; camera.updateProjectionMatrix(); }
+  const load = k.nextShot - now;
+  setText('flighthud', `${tankName(k)}   ${Math.round(Math.abs(k.speed) * 3.6)} km/h   GUN ${load > 0 ? 'LOADING ' + (load / 1000).toFixed(1) : 'READY'}   [E] GET OUT`);
+}
+// Other players' tanks follow their drivers; a tank whose driver has gone is parked where it stands.
+function updateTanks() {
+  for (const k of tanks) {
+    if (k.driver === null || k.driver === myId) continue;
+    const rp = remotes.get(k.driver);
+    if (!rp || rp.tank !== k) parkTank(k, false);
+  }
+  if (!P.alive || P.flight || P.tank) return;
+  const k = tankNear();
+  $('flighthud').classList.toggle('hidden', !k);
+  if (k) setText('flighthud', `PRESS  E  TO DRIVE THE ${tankName(k)}`);
+}
+
 // ---- The local player's roles ----
 let myPlane = null;
 const beachedBoats = [];
@@ -2674,6 +2956,7 @@ function endRide(beached) {
 }
 function clearDday() {
   endRide(false);
+  if (P.tank) exitTank(true);
   if (myPlane) { scene.remove(myPlane); myPlane = null; }
   for (const x of beachedBoats) scene.remove(x.b);
   beachedBoats.length = 0;
@@ -2830,6 +3113,7 @@ function updateDday(dt, now) {
     x.t += dt;
     if (x.t > 8) { scene.remove(x.b); beachedBoats.splice(i, 1); }
   }
+  if (isDday()) updateTanks();
   if (!P.alive || !isDday()) return;
   if (P.flight) {
     const f = P.flight, ready = now >= f.nextBomb;
@@ -2918,7 +3202,7 @@ const P = {
   reloadUntil: 0, reloadStart: 0, swapUntil: 0, nextFire: 0, wantShot: false, bloom: 0, kick: 0, camKick: 0,
   bobPhase: 0, stepDist: 0, viewY: 0, sprinting: false, jumpReady: 0, deathAt: 0, killerId: null, swayX: 0, swayY: 0,
   equip: { frag: 0, smoke: 0 }, throwReady: 0, throwUntil: 0, shake: 0, meleeUntil: 0,
-  form: 0, flight: null, chute: false, ride: null, jump: null, chuteAt: 0,
+  form: 0, tank: null, flight: null, chute: false, ride: null, jump: null, chuteAt: 0,
 };
 if (!LOADOUTS[P.loadout]) P.loadout = 'assault';
 const RADIUS = 0.38, GRAVITY = 22;
@@ -3007,7 +3291,7 @@ function bestSpawn() {
   return pickSpawn(enemies, anchor);
 }
 function showViewmodel() {
-  for (const [id, m] of Object.entries(vmModels)) m.visible = P.alive && !P.flight && curW() && id === curW().id;
+  for (const [id, m] of Object.entries(vmModels)) m.visible = P.alive && !P.flight && !P.tank && curW() && id === curW().id;
 }
 
 function swapTo(i, now) {
@@ -3099,7 +3383,7 @@ function updateMovement(dt, now, canMove) {
   }
 }
 
-const raycaster = new THREE.Raycaster();
+const raycaster = new THREE.Raycaster(), tankRay = new THREE.Raycaster();
 function muzzleWorld() {
   return new V3(0.16 * (1 - P.adsT), -0.12 * (1 - P.adsT) - 0.04, -0.9).applyMatrix4(camera.matrixWorld);
 }
@@ -3425,6 +3709,7 @@ function onMsg(m) {
       else {
         const rp = remotes.get(m.victim);
         if (rp?.form === FORM.plane && rp.group.visible) bigBoom(rp.group.position, 1.3);
+        if (rp?.tank) { bigBoom(rp.group.position, 1.2); releaseTank(rp, true); }
         if (rp) setRemoteAlive(rp, false);
       }
       if (m.killer === myId && m.victim !== myId) { showHitmarker(true); sfx.kill(); notify(`${m.head ? 'HEADSHOT  ' : ''}ELIMINATED ${pName(m.victim)}`, m.head ? '+150' : '+100'); }
@@ -3496,9 +3781,9 @@ function sendState(force) {
   if (!force && now - lastStateSent < 50) return;
   lastStateSent = now;
   const r2 = (v) => Math.round(v * 100) / 100;
-  const f = P.flight;
+  const f = P.flight || P.tank;
   net.send({ t: 'state', p: [r2(P.pos.x), r2(P.pos.y), r2(P.pos.z)], y: r2(f ? f.yaw : P.yaw), x: r2(f ? f.pitch : P.pitch), c: P.crouch || P.slideT > 0 ? 1 : 0,
-    s: r2(Math.hypot(P.vel.x, P.vel.z)), w: curW()?.id, r: P.form || 0, z: f ? r2(f.roll) : 0 });
+    s: r2(Math.hypot(P.vel.x, P.vel.z)), w: curW()?.id, r: P.form || 0, z: f ? r2(P.tank ? f.tyaw : f.roll) : 0 });
 }
 
 /* ======================= OFFLINE DEATHMATCH (BOTS) ======================= */
@@ -3678,6 +3963,7 @@ class LocalMatch {
     const now = serverNow();
     if (this.state !== 'playing' || now < this.startAt || !att.alive || !t.alive || att === t) return;
     if (this.teams && att.team === t.team) return;
+    if (t.form === FORM.tank) dmg *= w === 'bomb' || w === 'frag' ? TANK.blastMul : TANK.hitMul;
     t.hp -= clamp(Number(dmg) || 0, 0, 250);
     t.lastHit = now;
     if (t.ai) { t.ai.alertId = att.id; t.ai.alertUntil = now + 3000; }
@@ -4217,6 +4503,7 @@ class HostBots extends LocalMatch {
   applyHit(att, t, dmg, head, w) {
     if (!att.isBot || !att.alive || !t.alive || att.team === t.team) return;
     if (t.ai) { t.ai.alertId = att.id; t.ai.alertUntil = serverNow() + 3000; }
+    if (t.form === FORM.tank) dmg *= w === 'bomb' || w === 'frag' ? TANK.blastMul : TANK.hitMul;
     net.send({ t: 'bhit', id: att.id, target: t.id, dmg: Math.round(clamp(dmg, 0, 250)), head: !!head, w });
   }
   killSelf(t) {
@@ -4525,6 +4812,7 @@ function deployNow() {
 }
 
 function onMyDeath(killerId) {
+  exitTank(true);
   if (P.flight && !P.flight.crashed) bigBoom(P.pos, 1.3);
   if (myPlane) { scene.remove(myPlane); myPlane = null; }
   endRide(true);
@@ -4811,7 +5099,8 @@ addEventListener('keydown', (e) => {
     if (e.code === 'Space') { e.preventDefault(); deployNow(); }
     return;
   }
-  if (e.code === 'KeyR') startReload(now);
+  if (e.code === 'KeyE' && isDday()) { if (P.tank) exitTank(false); else { const k = tankNear(); if (k) enterTank(k); } }
+  else if (e.code === 'KeyR') startReload(now);
   else if (e.code === 'Digit1') swapTo(0, now);
   else if (e.code === 'Digit2') swapTo(1, now);
   else if (e.code === 'KeyQ') swapTo((P.cur + 1) % P.weapons.length, now);
@@ -4967,7 +5256,10 @@ function frame(now) {
   last = now;
   if (ui === 'hud' && match) {
     const canMove = serverNow() >= match.startAt && pointerLocked && !nukeState?.boomed;
-    if (P.alive && curW() && P.flight) {
+    if (P.alive && curW() && P.tank) {
+      updateTank(dt, now, canMove);
+      sendState(false);
+    } else if (P.alive && curW() && P.flight) {
       updateFlight(dt, now, canMove);
       updateFlightCamera(dt);
       sendState(false);
