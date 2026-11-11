@@ -544,6 +544,17 @@ class Builder {
       this.deco(geo, 'rubber', px, r, pz, 0, alongX ? Math.PI / 2 : 0, alongX ? 0 : Math.PI / 2);
     }
   }
+  // A WWII vehicle ('jeep', 'kubel', 'truck', 'blitz', 'sherman', 'panzer'), turned in quarter turns.
+  // It slides along z until it is clear of everything already built.
+  ww2(kind, x, z, turns = 0) {
+    const [geo, w, h, l] = ww2Geo(kind), sw = turns % 2 ? l : w, sl = turns % 2 ? w : l, box = new THREE.Box3();
+    for (let i = 0; i < 14; i++, z += 3) {
+      box.set(new V3(x - sw / 2, 0.05, z - sl / 2), new V3(x + sw / 2, h, z + sl / 2));
+      if (!this.colliders.some((c) => c.intersectsBox(box))) break;
+    }
+    const mesh = this.deco(geo, vcMat, x, 0, z, turns * Math.PI / 2);
+    mesh.userData.surf = 'metal'; this.meshes.push(mesh); this.colliders.push(box);
+  }
   pickup(x, z, alongX, paint) {
     const L = 5.2, W = 2.0, ax = (a) => (alongX ? [x + a, z] : [x, z + a]);
     const B = (a, y, l, h, w, m, o) => { const [px, pz] = ax(a); return alongX ? this.box(px, y, pz, l, h, w, m, o) : this.box(px, y, pz, w, h, l, m, o); };
@@ -932,6 +943,10 @@ const MAPS = {
       b.building(222, -30, 12, 7, 3.5, ['w'], 'wood', 'roof');
       b.building(222, 40, 12, 7, 3.5, ['w'], 'wood', 'roof');
       for (const [x, z] of [[206, 5], [208, 12], [216, -50], [216, 72]]) b.crate(x, z, 1.2, 1 + Math.floor(r() * 2));
+      // Vehicles: Allied armour and transport stuck on the beach, Axis vehicles around the strongpoints.
+      for (const [k, x, z, t] of [['sherman', -78, -60, 3], ['sherman', -74, 70, 3], ['jeep', -70, 10, 3], ['truck', -80, -140, 3], ['jeep', -76, 150, 0],
+        ['panzer', 70, 0, 1], ['panzer', 64, -90, 1], ['panzer', 150, -70, 1], ['kubel', 112, 86, 1], ['blitz', 92, 104, 0], ['kubel', 30, 78, 0],
+        ['blitz', 176, -70, 0], ['kubel', 204, -20, 1], ['blitz', 204, 30, 0], ['blitz', 228, 10, 0]]) b.ww2(k, x, z, t);
       // Allied fleet on the horizon.
       for (const [x, z, l] of [[-300, -260, 70], [-330, -150, 90], [-290, -40, 60], [-345, 60, 80], [-305, 170, 70], [-335, 280, 55]]) {
         b.box(x, 0, z, 14, 6, l, 'hull', { collide: false, ray: false });
@@ -2313,17 +2328,36 @@ const TROOPER = [
 const trooperGeo = {};
 function trooperGeos(team) {
   if (trooperGeo[team]) return trooperGeo[team];
-  const C = TROOPER[team], skin = 0xc09676, boot = 0x1e1a16, wood = 0x6b4a2a, steel = 0x2a2a2a;
+  const C = TROOPER[team], skin = 0xc09676, boot = 0x1e1a16, wood = 0x6b4a2a, steel = 0x2a2a2a, web = team === 0 ? 0x8a8462 : 0x2e2a20;
   const helmet = team === 0
-    ? [[0.34, 0.12, 0.36, 0, 0.27, 0, C.helmet], [0.28, 0.07, 0.3, 0, 0.35, 0, C.helmet]]
-    : [[0.4, 0.09, 0.42, 0, 0.23, 0.02, C.helmet], [0.3, 0.13, 0.32, 0, 0.31, 0, C.helmet]];
-  return (trooperGeo[team] = {
-    leg: colourBoxes([[0.2, 0.75, 0.24, 0, -0.375, 0, C.dark], [0.21, 0.16, 0.3, 0, -0.82, -0.03, boot]]),
-    torso: colourBoxes([[0.52, 0.62, 0.3, 0, 0.33, 0, C.cloth], [0.54, 0.08, 0.32, 0, 0.05, 0, 0x2e2a20], [0.38, 0.4, 0.15, 0, 0.36, 0.22, C.pack]]),
-    head: colourBoxes([[0.24, 0.27, 0.25, 0, 0.12, 0, skin], ...helmet]),
-    arms: colourBoxes([[0.13, 0.13, 0.5, 0.24, -0.08, -0.18, C.cloth], [0.13, 0.13, 0.5, -0.16, -0.06, -0.26, C.cloth],
-      [0.06, 0.09, 0.6, 0.1, 0, -0.45, wood], [0.03, 0.03, 0.4, 0.1, 0.03, -0.9, steel]]),
-  });
+    ? [[0.13, 0.165, 0.185, 0, 0], [0.2, 0.16, 0.18, 0, 0], [0.28, 0.12, 0.14, 0, 0], [0.315, 0.02, 0.02, 0, 0]]
+    : [[0.07, 0.195, 0.205, 0, 0.035], [0.13, 0.165, 0.18, 0, 0.01], [0.2, 0.16, 0.175, 0, 0], [0.28, 0.12, 0.135, 0, 0], [0.31, 0.02, 0.02, 0, 0]];
+  // Arms run from the shoulder to the hand on the rifle: [z, r, r, x, y] rings, the last stretch is the bare hand.
+  const arm = (hx, hy, hz, ex, sx) => loft('z', [[hz - 0.03, 0.02, 0.02, hx, hy], [hz, 0.05, 0.05, hx, hy], [hz + 0.09, 0.048, 0.048, hx + (ex - hx) * 0.2, hy - 0.01],
+    [(hz + 0.02) / 2, 0.06, 0.06, ex, -0.13], [0.03, 0.08, 0.08, sx, -0.02], [0.08, 0.02, 0.02, sx, 0]], C.cloth, { seg: 10, bands: [[hz - 0.03, hz + 0.08, skin]] });
+  const G = {
+    leg: loft('y', [[-0.875, 0.02, 0.03, 0, -0.04], [-0.865, 0.1, 0.155, 0, -0.045], [-0.78, 0.1, 0.15, 0, -0.04], [-0.72, 0.085, 0.1, 0, 0], [-0.42, 0.092, 0.108, 0, -0.012],
+      [-0.06, 0.118, 0.128, 0, 0], [0.02, 0.03, 0.03, 0, 0]], C.dark, { seg: 10, bands: [[-0.875, -0.68, boot], ...(team === 0 ? [[-0.68, -0.5, web]] : [])] }),
+    torso: mergeGeometries([
+      loft('y', [[0, 0.03, 0.03, 0, 0], [0.02, 0.235, 0.14, 0, 0], [0.1, 0.245, 0.15, 0, 0], [0.36, 0.26, 0.16, 0, 0], [0.56, 0.275, 0.15, 0, 0], [0.63, 0.19, 0.12, 0, 0], [0.67, 0.07, 0.075, 0, 0], [0.74, 0.06, 0.065, 0, 0]],
+        C.cloth, { sq: 0.8, seg: 14, bands: [[0.02, 0.1, 0x2e2a20]] }),
+      loft('y', [[0.13, 0.02, 0.02, 0, 0.23], [0.15, 0.19, 0.09, 0, 0.23], [0.52, 0.19, 0.1, 0, 0.23], [0.56, 0.02, 0.02, 0, 0.23]], C.pack, { sq: 0.5, seg: 12 }),
+      sbox(0.05, 0.5, 0.325, -0.12, 0.36, 0, web), sbox(0.05, 0.5, 0.325, 0.12, 0.36, 0, web),
+      sbox(0.1, 0.1, 0.06, -0.13, 0.1, -0.165, web), sbox(0.1, 0.1, 0.06, 0.13, 0.1, -0.165, web),
+      solid(new THREE.CylinderGeometry(0.05, 0.05, 0.13, 8), C.helmet, 0.2, 0.08, 0.13),   // canteen
+    ]),
+    head: mergeGeometries([
+      solid(new THREE.SphereGeometry(0.125, 12, 10).scale(1, 1.14, 1.06), skin, 0, 0.12, 0),
+      loft('y', helmet, C.helmet, { seg: 14 }),
+    ]),
+    arms: mergeGeometries([
+      arm(0.11, -0.03, -0.42, 0.26, 0.275), arm(0.085, -0.045, -0.7, -0.12, -0.275),
+      loft('z', [[-0.8, 0.01, 0.01, 0.1, 0], [-0.77, 0.026, 0.036, 0.1, 0], [-0.3, 0.03, 0.045, 0.1, 0], [-0.1, 0.03, 0.05, 0.1, -0.01], [0.13, 0.03, 0.075, 0.1, -0.06], [0.16, 0.01, 0.02, 0.1, -0.06]], wood, { seg: 8 }),
+      zcyl(0.014, 0.52, 0.1, 0.028, -0.98, steel, 8), sbox(0.02, 0.03, 0.2, 0.1, 0.055, -0.3, steel),
+    ]),
+  };
+  for (const k in G) lift(G[k], 2);
+  return (trooperGeo[team] = G);
 }
 const bandGeo = new THREE.BoxGeometry(0.15, 0.1, 0.32);
 function makeTrooper(team) {
@@ -2400,6 +2434,66 @@ const wingProf = (half, c0, c1, th, z, y, dih = 0, sweep = 0) => [-1, 1].flatMap
 const mirror = (bands) => bands.flatMap(([a, b, c]) => [[a, b, c], [-b, -a, c]]);
 const stripes = (from, w) => [0xe8e8e0, 0x111111, 0xe8e8e0, 0x111111, 0xe8e8e0].map((c, i) => [from + i * w, from + (i + 1) * w, c]);
 const zcyl = (r, len, x, y, z, c, seg = 10) => solid(new THREE.CylinderGeometry(r, r, len, seg).rotateX(Math.PI / 2), c, x, y, z);
+// WWII vehicles parked around Normandy, nose toward -z: [geometry, width, height, length].
+// The dark wartime paints read as black under the overcast sky, so the finished model's colours are lifted.
+const lift = (geo, k) => { const c = geo.attributes.color.array; for (let i = 0; i < c.length; i++) c[i] = Math.min(1, c[i] * k); return geo; };
+const ww2Cache = {};
+function ww2Geo(kind) {
+  if (ww2Cache[kind]) return ww2Cache[kind];
+  const allied = kind === 'jeep' || kind === 'truck' || kind === 'sherman';
+  const body = allied ? 0x57603c : kind === 'panzer' ? 0x9c8a5a : 0x5e6668, canvas = allied ? 0x77714e : 0x6a675a;
+  const dark = 0x1a1a1a, tyre = 0x141414, glass = 0x2a3a48, lamp = 0xe8e2c0, P = [];
+  const wheel = (r, w, x, z) => P.push(solid(new THREE.CylinderGeometry(r, r, w, 16).rotateZ(Math.PI / 2), tyre, x, r, z),
+    solid(new THREE.CylinderGeometry(r * 0.5, r * 0.5, w + 0.04, 10).rotateZ(Math.PI / 2), body, x, r, z));
+  const lamps = (x, y, z, r = 0.09) => { for (const s of [-1, 1]) P.push(solid(new THREE.SphereGeometry(r, 10, 8), lamp, s * x, y, z)); };
+  const star = (r, x, y, z) => {
+    const s = new THREE.Shape();
+    for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5, q = i % 2 ? r * 0.4 : r; s[i ? 'lineTo' : 'moveTo'](Math.sin(a) * q, Math.cos(a) * q); }
+    P.push(solid(new THREE.ShapeGeometry(s).rotateX(-Math.PI / 2), 0xe8e8e0, x, y, z));
+  };
+  let dims;
+  if (kind === 'jeep' || kind === 'kubel') {
+    const K = kind === 'kubel';
+    P.push(loft('z', [[-1.68, 0.02, 0.02, 0, 0.75], [-1.65, 0.6, K ? 0.12 : 0.22, 0, K ? 0.68 : 0.78], [-0.5, 0.64, 0.24, 0, 0.78], [-0.45, 0.02, 0.02, 0, 0.78]], body, { sq: 0.35 }),
+      loft('z', [[-0.6, 0.02, 0.02, 0, 0.72], [-0.57, 0.74, 0.3, 0, 0.72], [1.6, 0.74, 0.3, 0, 0.72], [1.63, 0.02, 0.02, 0, 0.72]], body, { sq: 0.3 }),
+      sbox(1.4, 0.5, 0.04, 0, 1.3, -0.5, glass), sbox(1.46, 0.05, 0.06, 0, 1.57, -0.5, body), sbox(1.2, 0.4, 0.12, 0, 1.1, 1.25, canvas),
+      solid(new THREE.TorusGeometry(0.16, 0.02, 6, 14).rotateX(-0.5), dark, -0.35, 1.18, -0.22),
+      K ? solid(new THREE.CylinderGeometry(0.36, 0.36, 0.2, 16).rotateX(0.2), tyre, 0, 0.98, -1.1) : solid(new THREE.CylinderGeometry(0.36, 0.36, 0.2, 16).rotateX(Math.PI / 2), tyre, 0.25, 0.85, 1.72));
+    if (!K) { P.push(sbox(0.9, 0.36, 0.04, 0, 0.78, -1.67, dark)); star(0.3, 0, 1.005, -1.05); }
+    lamps(K ? 0.6 : 0.45, K ? 0.86 : 0.82, K ? -1.5 : -1.67);
+    for (const s of [-1, 1]) {
+      P.push(sbox(0.05, 0.55, 0.06, s * 0.72, 1.3, -0.5, body), sbox(0.5, 0.5, 0.12, s * 0.35, 1.1, 0.3, canvas), sbox(0.5, 0.1, 0.45, s * 0.35, 0.98, 0.05, canvas), sbox(0.32, 0.06, 0.85, s * 0.78, 0.76, -1.1, body));
+      wheel(0.38, 0.24, s * 0.74, -1.05); wheel(0.38, 0.24, s * 0.74, 1.05);
+    }
+    dims = [1.75, 1.5, 3.5];
+  } else if (kind === 'truck' || kind === 'blitz') {
+    P.push(loft('z', [[-3.2, 0.02, 0.02, 0, 1.2], [-3.15, 0.6, 0.4, 0, 1.2], [-1.9, 0.72, 0.45, 0, 1.25], [-1.85, 0.02, 0.02, 0, 1.25]], body, { sq: 0.4 }),
+      loft('z', [[-1.95, 0.02, 0.02, 0, 1.6], [-1.9, 1.0, 0.85, 0, 1.6], [-0.6, 1.0, 0.85, 0, 1.6], [-0.55, 0.02, 0.02, 0, 1.6]], body, { sq: 0.35 }),
+      loft('z', [[-0.5, 0.02, 0.02, 0, 1.9], [-0.45, 1.15, 0.95, 0, 1.78], [3.1, 1.15, 0.95, 0, 1.78], [3.15, 0.02, 0.02, 0, 1.9]], canvas, { sq: 0.7, seg: 18 }),
+      sbox(1.7, 0.55, 0.04, 0, 1.98, -1.915, glass), sbox(2.3, 0.2, 3.7, 0, 0.92, 1.3, body), sbox(1.2, 0.25, 6, 0, 0.7, 0, dark), sbox(1.0, 0.6, 0.04, 0, 1.2, -3.17, dark), sbox(2.2, 0.12, 0.12, 0, 0.7, -3.25, dark));
+    lamps(0.78, 1.25, -3.1, 0.11);
+    for (const s of [-1, 1]) {
+      P.push(sbox(0.04, 0.5, 0.75, s * 1.0, 1.98, -1.25, glass), sbox(0.45, 0.08, 1.1, s * 0.95, 1.02, -2.5, body));
+      wheel(0.5, 0.34, s * 0.98, -2.5); wheel(0.5, 0.42, s * 0.94, 0.9); wheel(0.5, 0.42, s * 0.94, 2.1);
+    }
+    dims = [2.35, 2.7, 6.4];
+  } else {
+    const S = kind === 'sherman';
+    P.push(loft('z', [[-2.9, 0.02, 0.02, 0, 1.0], [-2.8, 0.95, 0.25, 0, 0.95], [-1.8, 1.0, 0.45, 0, 1.15], [2.5, 1.0, 0.45, 0, 1.15], [2.8, 0.95, 0.3, 0, 1.05], [2.85, 0.02, 0.02, 0, 1.0]], body, { sq: 0.4 }),
+      S ? loft('y', [[1.55, 0.02, 0.02, 0, -0.1], [1.6, 0.85, 1.0, 0, -0.1], [2.2, 0.75, 0.9, 0, -0.05], [2.3, 0.3, 0.3, 0, 0], [2.32, 0.02, 0.02, 0, 0]], body, { sq: 0.8, seg: 16 })
+        : loft('y', [[1.55, 0.02, 0.02, 0, 0], [1.6, 0.9, 1.15, 0, 0], [2.15, 0.8, 1.05, 0, 0.05], [2.2, 0.02, 0.02, 0, 0.05]], body, { sq: 0.4, seg: 16 }),
+      zcyl(0.075, S ? 2.4 : 3.2, 0, 1.92, S ? -2.1 : -2.6, body, 10), sbox(0.7, 0.5, 0.35, 0, 1.92, -1.05, body),
+      solid(new THREE.CylinderGeometry(0.3, 0.3, 0.14, 12), body, S ? -0.3 : 0, S ? 2.3 : 2.25, 0.2));
+    if (!S) P.push(zcyl(0.11, 0.3, 0, 1.92, -4.15, dark, 10));
+    for (const s of [-1, 1]) {
+      P.push(loft('z', [[-3, 0.02, 0.02, s * 1.2, 0.5], [-2.95, 0.28, 0.3, s * 1.2, 0.62], [-2.4, 0.28, 0.5, s * 1.2, 0.5], [2.4, 0.28, 0.5, s * 1.2, 0.5], [2.95, 0.28, 0.3, s * 1.2, 0.62], [3, 0.02, 0.02, s * 1.2, 0.5]], 0x222220, { sq: 0.45 }));
+      for (let z = -2.1; z <= 2.2; z += 0.84) P.push(solid(new THREE.CylinderGeometry(0.3, 0.3, 0.08, 12).rotateZ(Math.PI / 2), body, s * 1.47, 0.36, z));
+    }
+    if (S) star(0.45, 0, 1.605, 1.6);
+    dims = [2.95, 2.35, 6];
+  }
+  return (ww2Cache[kind] = [lift(mergeGeometries(P), 1.8), ...dims]);
+}
 // WWII fighters: an Allied Mustang in olive with invasion stripes and a red nose, an Axis 109 in grey with yellow nose and wingtips.
 const planeGeo = {};
 function planeGeos(team) {
