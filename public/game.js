@@ -3,7 +3,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { createPost, skyMaterial, bakeSkyEnv, normalFromTex, addReverb, wetGround, wetTime, createRain } from './fx.js';
+import { createPost, skyMaterial, bakeSkyEnv, normalFromTex, addReverb, wetGround, wetTime, wetAmt, createRain } from './fx.js';
 
 const $ = (id) => document.getElementById(id);
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -94,7 +94,7 @@ scene.add(muzzleLight);
 const sky = new THREE.Mesh(new THREE.SphereGeometry(450, 32, 16), skyMaterial());
 const post = createPost(renderer);
 const fxState = { time: 0, dt: 0, hurt: 0, lowHp: 0, ads: 0, sunDir: sky.material.uniforms.sunDir.value, sunCol: sky.material.uniforms.sunCol.value };
-let skyEnv = null, fxHp = 100, fxHurt = 0, rainSnd = null;
+let skyEnv = null, fxHp = 100, fxHurt = 0, rainSnd = null, raining = false;
 const rain = createRain(scene);
 sky.renderOrder = -1;
 scene.add(sky);
@@ -293,10 +293,10 @@ function containerTex(hex) {
 }
 
 const MATDEFS = {
-  concrete: { tex: TEX.concrete, ts: 4, rough: 0.95, surf: 'dust' },
+  concrete: { tex: TEX.concrete, ts: 4, rough: 0.95, surf: 'dust', wet: true },
   asphalt:  { tex: TEX.asphalt, ts: 7, rough: 1, surf: 'dust' },
   asphalt_wet: { tex: TEX.asphalt, ts: 7, rough: 1, surf: 'dust', wet: true },
-  sand:     { tex: TEX.sand, ts: 8, rough: 1, surf: 'sand' },
+  sand:     { tex: TEX.sand, ts: 8, rough: 1, surf: 'sand', wet: true },
   plaster:  { tex: TEX.plaster, ts: 3, rough: 0.95, surf: 'sand' },
   brick:    { tex: TEX.brick, ts: 2.5, rough: 0.9, surf: 'dust' },
   metal:    { tex: TEX.metal, ts: 2, rough: 0.55, metal: 0.35, surf: 'metal' },
@@ -316,11 +316,11 @@ const MATDEFS = {
   cont_orange: { tex: containerTex('#b8611f'), ts: 2.6, rough: 0.65, metal: 0.25, surf: 'metal' },
   cont_gray:   { tex: containerTex('#6b6f73'), ts: 2.6, rough: 0.65, metal: 0.25, surf: 'metal' },
   cont_white:  { tex: containerTex('#b9b5aa'), ts: 2.6, rough: 0.65, metal: 0.25, surf: 'metal' },
-  grass:     { tex: TEX.grass, ts: 6, rough: 1, surf: 'dust' },
+  grass:     { tex: TEX.grass, ts: 6, rough: 1, surf: 'dust', wet: true },
   hedge:     { tex: TEX.hedge, ts: 2.5, rough: 1, surf: 'wood' },
   steel:     { color: 0x3b3a38, rough: 0.7, metal: 0.5, surf: 'metal' },
   hull:      { color: 0x5f6a70, rough: 0.6, metal: 0.4, surf: 'metal' },
-  sidewalk:  { tex: TEX.sidewalk, ts: 3, rough: 0.95, surf: 'dust' },
+  sidewalk:  { tex: TEX.sidewalk, ts: 3, rough: 0.95, surf: 'dust', wet: true },
   shingle:   { tex: TEX.shingle, ts: 2, rough: 0.95, surf: 'wood' },
   woodfloor: { tex: TEX.woodfloor, ts: 2.5, rough: 0.8, surf: 'wood' },
   picket:    { tex: TEX.picket, ts: 1.2, rough: 0.8, surf: 'wood', alpha: true },
@@ -612,7 +612,7 @@ const MAPS = {
   harbor: {
     name: 'HARBOR', desc: 'Container yard • mid-range lanes', half: 44,
     zones: { dom: [[-23.5, -6], [-4.5, 7.5], [32, 0]], hp: [[-4.5, 7.5], [5.5, -25.5], [32, 0], [0, 23], [-23.5, -6]] },
-    env: { sky: [0x33455a, 0x8f9da6], fog: [0x77868f, 28, 170], sun: [0xffc48a, 3.6, [45, 32, 30]], hemi: [0xa9bccd, 0x3c3630, 0.8], exposure: 0.95, cloud: 0.74, rain: true },
+    env: { sky: [0x33455a, 0x8f9da6], fog: [0x77868f, 28, 170], sun: [0xffc48a, 3.6, [45, 32, 30]], hemi: [0xa9bccd, 0x3c3630, 0.8], exposure: 0.95, cloud: 0.74, rain: 1, wet: 1, lit: true },
     build(b) {
       const r = mulberry32(1337);
       b.ground('asphalt_wet', 160);
@@ -646,7 +646,8 @@ const MAPS = {
   dust: {
     name: 'DUST', desc: 'Desert town • streets & buildings', half: 48,
     zones: { dom: [[-30, 2.5], [-6, 0], [30, -3.5]], hp: [[-6, 0], [0, -16], [18, 0], [0, 24], [-18, 0]] },
-    env: { sky: [0x6f9ccf, 0xf2dcb4], fog: [0xe6d3b0, 45, 190], sun: [0xffe2b0, 3.6, [-50, 60, 20]], hemi: [0xd8e4f0, 0x8a6a44, 1.0], exposure: 1.0 },
+    // golden hour: low sun down the streets, long shadows, dust hanging in the light
+    env: { sky: [0x3f6fb0, 0xf6c98a], fog: [0xe3b98a, 35, 170], sun: [0xffb46a, 4.4, [-60, 27, 24]], hemi: [0xbfd0ea, 0x8a5a34, 0.8], exposure: 1.0, cloud: 0.42, rays: 1, motes: [0xffe2b4, 0.4, 0.25, 1.6] },
     build(b) {
       const r = mulberry32(42);
       b.ground('sand', 170);
@@ -683,7 +684,8 @@ const MAPS = {
   sundown: {
     name: 'SUNDOWN', desc: '1960s desert town • two houses, fast & close', half: 34,
     zones: { dom: [[-24, 0], [0, -2], [24, 0]], hp: [[0, -2], [-24, 0], [24, 0], [-15.5, -23.5], [5.5, 31]] },
-    env: { sky: [0x5b9ae0, 0xf3dfc2], fog: [0xead9c0, 70, 280], sun: [0xfff0d4, 3.4, [40, 75, 25]], hemi: [0xcfe0ff, 0x8a7458, 1.05], exposure: 1.05 },
+    // a real sundown: purple sky, orange horizon, street lamps on
+    env: { sky: [0x2b2f63, 0xff8a4a], fog: [0xd98a62, 50, 230], sun: [0xff8a45, 4.2, [48, 19, 28]], hemi: [0x8f8fc8, 0x70402c, 0.75], exposure: 1.05, cloud: 0.58, rays: 1, lit: true, motes: [0xffc890, 0.3, 0.2, 1.2] },
     build(b) {
       const W = (c, w = 1.4) => ({ c, w, y0: 1.0, y1: 2.15 });         // ground-floor window
       const U = (c, w = 1.3) => ({ c, w, y0: 4.0, y1: 5.15 });         // upstairs window
@@ -771,10 +773,12 @@ const MAPS = {
   foundry: {
     name: 'FOUNDRY', desc: 'Warehouse at dusk • close quarters & raised deck', half: 38,
     zones: { dom: [[-27, 0], [0, -7.5], [27.5, 0]], hp: [[0, -7.5], [0, -26.5], [22, -4.5], [0, 17.5], [-22, -4.5]] },
-    env: { sky: [0x2e3a5a, 0xe08a4a], fog: [0x7a6050, 30, 150], sun: [0xffb070, 2.8, [-40, 38, -30]], hemi: [0x8090b0, 0x4a3a30, 1.0], exposure: 1.05 },
+    // dusk after rain: wet floor, wall lights on, embers drifting up
+    env: { sky: [0x1c2242, 0xb5603a], fog: [0x4e4240, 30, 150], sun: [0xff9a55, 2.6, [-40, 25, -30]], hemi: [0x7080a8, 0x40302a, 0.7], exposure: 0.9, cloud: 0.66, rays: 0.3, wet: 0.85, slick: 0.6, lit: true, motes: [0xff8a30, 0.7, -1.4, 0.6] },
     build(b) {
       b.ground('concrete', 150);
       b.perimeter(38, 9, 'brick');
+      for (const s of [-1, 1]) for (const z of [-22, 0, 22]) { b.box(s * 37.85, 6, z, 0.25, 0.3, 1.2, 'lamp', { collide: false, ray: false, shadow: false }); b.glow(s * 36.6, 5.8, z); }
       // Central raised deck with stairs and railings
       b.box(0, 0, 0, 16, 3, 8, 'metal');
       b.box(0, 3, -3.95, 16, 1, 0.1, 'metal'); b.box(0, 3, 3.95, 16, 1, 0.1, 'metal');
@@ -804,7 +808,8 @@ const MAPS = {
     name: 'NORMANDY', desc: 'D-Day • long beach, bunkers, two villages, a manor, hedgerows & a gun battery', half: 240, dday: true,
     // A and B: bunkers on the bluff. C: the village. D: the farm. E: the gun battery.
     zones: { dom: [[-25, -120], [-25, 100], [25, 10], [110, 110], [150, -90]], hp: [[-25, -120], [-25, 100], [25, 10], [110, 110], [150, -90]] },
-    env: { sky: [0x7890a8, 0xd5d8d4], fog: [0xb7bfc3, 110, 420], sun: [0xfff0d8, 2.9, [-70, 95, 45]], hemi: [0xc8d4e2, 0x6b6450, 1.15], exposure: 1.0 },
+    // 6 June 1944: heavy cloud, drizzle, wet sand and muddy fields, sun breaking through low
+    env: { sky: [0x56687c, 0xc9c4b4], fog: [0xa9b0b2, 90, 400], sun: [0xffdcae, 3.4, [-80, 52, 45]], hemi: [0xb8c6d6, 0x5c5848, 1.0], exposure: 1.0, cloud: 0.7, rays: 0.6, wet: 0.7, slick: 0.7, rain: 0.55 },
     build(b) {
       const r = mulberry32(1944);
       const H = 240;
@@ -1015,7 +1020,7 @@ function loadMap(id) {
   mapGroup = new THREE.Group();
   scene.add(mapGroup);
   const b = new Builder(mapGroup);
-  b.lit = !!def.env.rain;
+  b.lit = !!def.env.lit;
   def.build(b);
   colliders = b.colliders;
   buildColliderGrid();
@@ -1039,8 +1044,15 @@ function loadMap(id) {
   su.sunDir.value.set(...e.sun[2]).normalize(); su.sunCol.value.set(e.sun[0]); su.ground.value.set(e.hemi[1]); su.uCloud.value = e.cloud ?? 0.5;
   skyEnv = bakeSkyEnv(renderer, sky, skyEnv);
   // Rain makes every surface slick, not just the ground.
-  rain.visible = !!e.rain;
-  for (const m of Object.values(MATS)) m.roughness = m.userData.rough * (e.rain ? 0.5 : 1);
+  // Weather: rain, or dust and embers drifting in the light; wet ground where it has rained.
+  raining = !!e.rain;
+  rain.visible = raining || !!e.motes;
+  if (raining) rain.set(0xc4d6e4, 0.32 * e.rain);
+  else if (e.motes) rain.set(e.motes[0], e.motes[1], e.motes[2], e.motes[3], 0.05);
+  wetAmt.value.set(e.wet ?? 0, raining ? 1 : 0);
+  fxState.rays = e.rays ?? 0;
+  const slick = e.slick ?? (raining ? 0.5 : 1);
+  for (const m of Object.values(MATS)) { m.roughness = m.userData.rough * slick; if (m.userData.wet) m.envMapIntensity = e.wet ? 2.2 : 1; }
   syncRainSound();
   scene.environment = vmScene.environment = skyEnv.texture;
   renderer.toneMappingExposure = e.exposure;
@@ -1071,7 +1083,7 @@ function initAudio() {
 }
 function syncRainSound() {
   if (!AC || !noiseBuf) return;
-  if (rain.visible && !rainSnd) {
+  if (raining && !rainSnd) {
     const src = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
     src.buffer = noiseBuf; src.loop = true;
     f.type = 'bandpass'; f.frequency.value = 2600; f.Q.value = 0.4;
@@ -1079,7 +1091,7 @@ function syncRainSound() {
     src.connect(f); f.connect(g); g.connect(master);
     src.start();
     rainSnd = src;
-  } else if (!rain.visible && rainSnd) { rainSnd.stop(); rainSnd = null; }
+  } else if (!raining && rainSnd) { rainSnd.stop(); rainSnd = null; }
 }
 function outNode(vol, pan) {
   const g = AC.createGain();

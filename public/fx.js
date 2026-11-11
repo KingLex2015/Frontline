@@ -30,7 +30,7 @@ void main(){
 const FINAL = `
 uniform sampler2D tScene, tBloom;
 uniform vec2 uSunUv; uniform vec3 uSunCol;
-uniform float uSunOn, uAspect, uTime, uExposure, uBloom, uHurt, uLowHp, uAds;
+uniform float uRays, uSunOn, uAspect, uTime, uExposure, uBloom, uHurt, uLowHp, uAds;
 varying vec2 vUv;
 float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 float hash(vec2 p){ vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
@@ -70,6 +70,14 @@ void main(){
   vec3 col = vec3(texture2D(tScene, vUv + off).r, texture2D(tScene, vUv).g, texture2D(tScene, vUv - off).b);
   vec3 bloom = texture2D(tBloom, vUv).rgb;
   col += bloom * uBloom;
+  if (uRays > 0.0) {
+    // light shafts: smear the bright parts of the picture away from the sun
+    vec2 dv = (uSunUv - vUv) / 18.0, rp = vUv; vec3 rays = vec3(0.0); float rw = 1.0;
+    float jit = hash(vUv * 913.0 + uTime);
+    rp += dv * jit;
+    for (int i = 0; i < 18; i++) { rays += texture2D(tBloom, clamp(rp, 0.0, 1.0)).rgb * rw; rp += dv; rw *= 0.92; }
+    col += rays * uSunCol * uRays * 0.016;
+  }
   float vis = sunSeen();
   if (vis > 0.0) col += flare(vUv, vis);
   col = aces(col * uExposure / 0.6);
@@ -103,7 +111,7 @@ export function createPost(renderer) {
   const up = shader(UP, { tSrc: { value: null }, tAdd: { value: null }, uTexel: { value: new THREE.Vector2() } });
   const fin = shader(FINAL, {
     tScene: { value: null }, tBloom: { value: null }, uSunUv: { value: new THREE.Vector2() }, uSunCol: { value: new THREE.Color(1, 1, 1) },
-    uSunOn: { value: 0 }, uAspect: { value: 1 }, uTime: { value: 0 }, uExposure: { value: 1 }, uBloom: { value: 0.5 },
+    uRays: { value: 0 }, uSunOn: { value: 0 }, uAspect: { value: 1 }, uTime: { value: 0 }, uExposure: { value: 1 }, uBloom: { value: 0.5 },
     uHurt: { value: 0 }, uLowHp: { value: 0 }, uAds: { value: 0 },
   });
   const MIPS = 5;
@@ -165,6 +173,7 @@ export function createPost(renderer) {
       u.uSunCol.value.copy(st.sunCol);
       camera.getWorldDirection(_d);
       u.uSunOn.value = _d.dot(st.sunDir) > 0.15 ? 1 : 0;
+      u.uRays.value = (st.rays ?? 0) * Math.min(1, Math.max(0, (_d.dot(st.sunDir) - 0.2) * 2.5));
       _v.copy(st.sunDir).multiplyScalar(400).add(camera.position).project(camera);
       u.uSunUv.value.set(_v.x * 0.5 + 0.5, _v.y * 0.5 + 0.5);
       pass(fin, null);
@@ -276,15 +285,17 @@ export function addReverb(AC, from, to, wet = 0.16, seconds = 1.5) {
 /* ------------------------------ weather ------------------------------ */
 
 export const wetTime = { value: 0 };
+// x: how wet the ground is (0 dry, 1 soaked), y: rain rings in the puddles
+export const wetAmt = { value: new THREE.Vector2(0, 0) };
 
 // Rain-soaked ground: dark damp patches, mirror puddles with rain rings, everything else slick.
 export function wetGround(m) {
   m.onBeforeCompile = (sh) => {
-    sh.uniforms.uWetTime = wetTime;
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWp;')
-      .replace('#include <project_vertex>', '#include <project_vertex>\nvWp = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.uniforms.uWetTime = wetTime; sh.uniforms.uWet = wetAmt;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWp; varying float vUp;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvWp = (modelMatrix * vec4(transformed, 1.0)).xyz; vUp = normalize(mat3(modelMatrix) * objectNormal).y;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
-varying vec3 vWp; uniform float uWetTime;
+varying vec3 vWp; varying float vUp; uniform float uWetTime; uniform vec2 uWet;
 float wh(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float wn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(wh(i), wh(i + vec2(1.0, 0.0)), f.x), mix(wh(i + vec2(0.0, 1.0)), wh(i + vec2(1.0, 1.0)), f.x), f.y); }
@@ -295,17 +306,18 @@ vec2 ring(vec2 p, float t){
   return normalize(f + 1e-4) * sin((d - r) * 70.0) * smoothstep(0.06, 0.0, abs(d - r)) * (1.0 - ph);
 }`)
       .replace('#include <map_fragment>', `#include <map_fragment>
-float wetN = wfbm(vWp.xz * 0.13);
-float puddle = smoothstep(0.50, 0.60, wetN), damp = smoothstep(0.28, 0.52, wetN);
-diffuseColor.rgb *= mix(0.78, 0.36, damp);`)
+float wetUp = smoothstep(0.5, 0.9, vUp) * step(0.001, uWet.x);
+float wetN = wfbm(vWp.xz * 0.13) - (1.0 - uWet.x) * 0.22;
+float puddle = smoothstep(0.50, 0.60, wetN) * wetUp, damp = smoothstep(0.28, 0.52, wetN) * wetUp;
+diffuseColor.rgb *= mix(1.0, mix(0.78, 0.36, damp), wetUp);`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-roughnessFactor = mix(mix(0.62, 0.26, damp), 0.02, puddle);`)
+roughnessFactor = mix(roughnessFactor, mix(mix(0.62, 0.26, damp), 0.02, puddle), wetUp);`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
 vec2 rp = ring(vWp.xz * 1.7, uWetTime) + ring(vWp.xz * 2.9 + 3.7, uWetTime + 0.37);
-normal = normalize(mix(normal, nonPerturbedNormal, puddle) + (viewMatrix * vec4(rp.x, 0.0, rp.y, 0.0)).xyz * 0.22 * puddle);`);
+normal = normalize(mix(normal, nonPerturbedNormal, puddle) + (viewMatrix * vec4(rp.x, 0.0, rp.y, 0.0)).xyz * 0.22 * puddle * uWet.y);`);
   };
   m.customProgramCacheKey = () => 'wet-ground';
-  m.envMapIntensity = 2.2;
+  m.userData.wet = true;
 }
 
 // Rain streaks that stay around the camera wherever it goes.
@@ -317,13 +329,16 @@ export function createRain(scene, count = 1600) {
   const rain = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xc4d6e4, transparent: true, opacity: 0.32, depthWrite: false }));
   rain.frustumCulled = false; rain.visible = false;
   scene.add(rain);
+  let fallV = 27, driftV = 3, len = 0.8;
+  // rain: fast long streaks. dust and embers: slow specks.
+  rain.set = (color, opacity, fall = 27, drift = 3, l = 0.8) => { rain.material.color.set(color); rain.material.opacity = opacity; fallV = fall; driftV = drift; len = l; };
   const wrap = (v, c, n) => c + ((((v - c) % n) + n) % n) - n / 2;
   rain.update = (t, cam) => {
-    const fall = t * 27, drift = t * 3;
+    const fall = t * fallV, drift = t * driftV;
     for (let i = 0; i < count; i++) {
       const x = wrap(base[i * 3] - drift, cam.x, 30), y = wrap(base[i * 3 + 1] - fall, cam.y + 6, 20), z = wrap(base[i * 3 + 2], cam.z, 30), k = i * 6;
       pos[k] = x; pos[k + 1] = y; pos[k + 2] = z;
-      pos[k + 3] = x + 0.09; pos[k + 4] = y + 0.8; pos[k + 5] = z;
+      pos[k + 3] = x + len * 0.11; pos[k + 4] = y + len; pos[k + 5] = z;
     }
     geo.attributes.position.needsUpdate = true;
   };
