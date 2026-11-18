@@ -20,13 +20,16 @@ PORT = int(os.environ.get("PORT", "3000"))
 PUBLIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "public")
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-MAPS = ["harbor", "dust", "foundry", "sundown", "normandy"]
-LOADOUTS = ["assault", "smg", "gunner", "marksman"]
-MODES = ["ffa", "dom", "hp", "inf", "dday"]
+MAPS = ["harbor", "dust", "foundry", "sundown", "normandy", "warfare", "island"]
+# Modes that are locked to their own map.
+OWN_MAP = {"dday": "normandy", "war": "warfare", "br": "island"}
+WAR_PLAYERS = 45
+LOADOUTS = ["assault", "smg", "gunner", "marksman", "breacher"]
+MODES = ["ffa", "dom", "hp", "inf", "dday", "war", "br"]
 CHARS = ["bulwark", "viper", "wraith", "hawk"]
-TEAM_MODES = ("dom", "hp", "inf", "dday")
+TEAM_MODES = ("dom", "hp", "inf", "dday", "br")
 MAX_PLAYERS = 12
-SCORE_LIMIT = {"ffa": 30, "dom": 200, "hp": 150, "inf": 0, "dday": 500}
+SCORE_LIMIT = {"ffa": 30, "dom": 200, "hp": 150, "inf": 0, "dday": 500, "war": 0, "br": 0}
 # D-Day: 100 soldiers, 50 a side. Per side: landing infantry, paratroopers, fighter pilots.
 DDAY_ROLES = ({"inf": 20, "para": 15, "jet": 15}, {"inf": 20, "para": 15, "jet": 15})
 DDAY_TIME_MS = 15 * 60 * 1000
@@ -54,9 +57,106 @@ MAP_ZONES = {
                 "hp": [(0, -2), (-24, 0), (24, 0), (-15.5, -23.5), (5.5, 31)]},
     "foundry": {"dom": [(-27, 0), (0, -7.5), (27.5, 0)],
                 "hp": [(0, -7.5), (0, -26.5), (22, -4.5), (0, 17.5), (-22, -4.5)]},
+    "warfare": {"dom": [], "hp": []},
+    "island": {"dom": [], "hp": []},
     "normandy": {"dom": [(-25, -120), (-25, 100), (25, 10), (110, 110), (150, -90)],
                  "hp": [(-25, -120), (-25, 100), (25, 10), (110, 110), (150, -90)]},
 }
+
+
+# Battle royale: everyone jumps from one plane onto the island; a gas circle closes in. Until the
+# cutoff a death means a redeploy from the sky; after it, deaths are final and the last squad wins.
+# People are one squad (team 0); every bot is its own squad (team 100+). Mirrors BR in game.js.
+BR_SIZE = 24
+BR_RESPAWN_MS = 8000
+BR_PLANE_LEN = 560
+BR_HALF = 145
+# Each phase: (radius, shrink ms, hold ms, gas damage per second).
+BR_PHASES = [(215, 0, 55000, 1), (130, 25000, 35000, 3), (80, 20000, 30000, 5), (45, 18000, 25000, 8),
+             (22, 15000, 20000, 12), (8, 15000, 20000, 16), (0, 12000, 30000, 25)]
+BR_CUTOFF_PHASE = 3
+BR_AIR_FORMS = (1, 4, 6)  # under a canopy, riding the plane, skydiving
+BR_NAMES = ["Ghost", "Reaper", "Havoc", "Nomad", "Saber", "Raven", "Blitz", "Cobra", "Specter", "Onyx", "Drifter", "Talon",
+            "Viking", "Mako", "Frost", "Jackal", "Rook", "Bishop", "Wolf", "Hawke", "Ember", "Kodiak", "Rogue", "Bandit", "Shade", "Atlas"]
+
+
+def br_plan():
+    """The plane's line across the island and the gas circle keyframes [ms, x, z, r]."""
+    a = random.random() * math.pi * 2
+    off = (random.random() - 0.5) * 100
+    dx, dz = math.cos(a), math.sin(a)
+    px, pz, half_len = -dz * off, dx * off, BR_PLANE_LEN / 2
+    kf = [[0, 0, 0, BR_PHASES[0][0]]]
+    t, x, z, prev_r, cutoff = 0, 0.0, 0.0, BR_PHASES[0][0], 0
+    for i, (rad, shrink, hold, _) in enumerate(BR_PHASES):
+        if i > 0:
+            room = max(0, min(prev_r, BR_HALF) - rad) * 0.85
+            ang, d = random.random() * math.pi * 2, random.random() * room
+            lim = BR_HALF - rad * 0.6
+            x = max(-lim, min(lim, x + math.cos(ang) * d))
+            z = max(-lim, min(lim, z + math.sin(ang) * d))
+            t += shrink
+            kf.append([t, round(x, 1), round(z, 1), rad])
+            if i == BR_CUTOFF_PHASE:
+                cutoff = t
+        t += hold
+        kf.append([t, kf[-1][1], kf[-1][2], rad])
+        prev_r = rad
+    return {"plane": [px - dx * half_len, pz - dz * half_len, px + dx * half_len, pz + dz * half_len],
+            "kf": kf, "cutoff": cutoff, "endMs": t}
+
+
+def circle_at(kf, tau):
+    if tau <= kf[0][0]:
+        return kf[0][1], kf[0][2], kf[0][3]
+    for i in range(1, len(kf)):
+        t1, x1, z1, r1 = kf[i]
+        if tau <= t1:
+            t0, x0, z0, r0 = kf[i - 1]
+            k = (tau - t0) / (t1 - t0) if t1 > t0 else 1
+            return x0 + (x1 - x0) * k, z0 + (z1 - z0) * k, r0 + (r1 - r0) * k
+    return kf[-1][1], kf[-1][2], kf[-1][3]
+
+
+def gas_dps(kf, tau):
+    """How hard the gas bites now: the phase that is closing, or the last one that closed."""
+    for i in range(1, len(kf)):
+        if kf[i][3] < kf[i - 1][3] and tau < kf[i][0]:
+            closing = tau >= kf[i - 1][0]
+            phase = next(j for j, ph in enumerate(BR_PHASES) if ph[0] == kf[i][3])
+            return BR_PHASES[max(0, phase - (0 if closing else 1))][3]
+    return BR_PHASES[-1][3]
+
+
+def br_past_cutoff(room):
+    return room.mode == "br" and room.br and now_ms() - room.start_at >= room.br["cutoff"]
+
+
+def mark_out(room, p):
+    if br_past_cutoff(room):
+        p.out = True
+
+
+def check_br(room):
+    """After the cutoff the match ends when one squad is left."""
+    if room.state != "playing" or room.mode != "br" or not br_past_cutoff(room):
+        return
+    if len({x.team for x in room.players.values() if not x.out}) <= 1:
+        end_match(room)
+
+
+def fill_br(room):
+    """Bots take every slot people leave empty, each its own squad."""
+    taken = {x.name for x in room.players.values()}
+    names = [n for n in BR_NAMES if n not in taken]
+    random.shuffle(names)
+    for i in range(max(0, BR_SIZE - len(room.players))):
+        b = Player(BotConn())
+        b.bot, b.team, b.room = True, 100 + i, room
+        b.name = names[i] if i < len(names) else f"Bot {i + 1}"
+        b.char, b.loadout = random.choice(CHARS), random.choice(["assault", "smg", "gunner", "marksman"])
+        b.loaded = b.alive = True
+        room.players[b.id] = b
 
 
 def dom_like(mode):
@@ -176,10 +276,13 @@ class Player:
         self.died_at = 0
         self.last_hit = 0
         self.pos = None
+        self.out = False
+        self.air = True
 
     def public(self):
         return {"id": self.id, "name": self.name, "loadout": self.loadout, "char": self.char, "team": self.team,
-                "role": self.role, "bot": self.bot, "kills": self.kills, "deaths": self.deaths, "hp": self.hp, "alive": self.alive}
+                "role": self.role, "bot": self.bot, "kills": self.kills, "deaths": self.deaths, "hp": self.hp, "alive": self.alive,
+                "out": self.out}
 
 
 class Room:
@@ -195,6 +298,8 @@ class Room:
         self.load_task = None
         self.nuke_at = 0
         self.nuke_by = None
+        self.br = None
+        self.cutoff_done = False
         self.reset_objectives()
 
     def reset_objectives(self):
@@ -237,6 +342,7 @@ def lobby_state(room):
 def go_msg(room):
     return {"t": "go", "mode": room.mode, "startAt": room.start_at, "endAt": room.end_at,
             "scoreLimit": SCORE_LIMIT[room.mode], "obj": room.obj(), "nukeKills": NUKE_KILLS, "nukeAt": room.nuke_at, "nukeBy": room.nuke_by,
+            "br": room.br if room.mode == "br" else None,
             "players": [p.public() for p in room.players.values()]}
 
 
@@ -282,6 +388,9 @@ def leave_room(p):
         check_all_loaded(room)
     elif room.state == "playing" and room.mode == "inf":
         check_infected(room)
+    elif room.state == "playing":
+        check_war(room)
+        check_br(room)
 
 
 def start_loading(room):
@@ -323,8 +432,15 @@ def begin_match(room):
         p.alive = p.loaded
         p.hp = 100
     assign_teams(room)
+    if room.mode == "br":
+        room.br = br_plan()
+        room.cutoff_done = False
+        room.end_at = room.start_at + room.br["endMs"]
+        fill_br(room)
     if room.mode == "dday":
         fill_dday(room)
+    elif room.mode == "war":
+        fill_war(room)
     broadcast(room, go_msg(room))
 
 
@@ -349,6 +465,23 @@ def fill_dday(room):
                 room.players[b.id] = b
 
 
+def fill_war(room):
+    """Warfare is always 45 fighters: bots take every slot people leave empty."""
+    for _ in range(max(0, WAR_PLAYERS - len(room.players))):
+        b = Player(BotConn())
+        b.bot, b.team, b.room = True, -1, room
+        b.name = random.choice(BOT_NAMES)
+        b.char, b.loadout = random.choice(CHARS), random.choice(LOADOUTS)
+        b.loaded = b.alive = True
+        room.players[b.id] = b
+
+
+def check_war(room):
+    """Warfare has no respawns: the match ends when one fighter is left."""
+    if room.state == "playing" and room.mode == "war" and sum(1 for x in room.players.values() if x.alive) <= 1:
+        end_match(room)
+
+
 def remove_bots(room):
     for pid in [pid for pid, x in room.players.items() if x.bot]:
         room.players.pop(pid)
@@ -364,15 +497,18 @@ def kill_self(room, p, w):
     p.alive = False
     p.deaths += 1
     p.died_at = now_ms()
+    mark_out(room, p)
     broadcast(room, {"t": "kill", "killer": p.id, "victim": p.id, "head": False, "w": w,
-                     "kk": p.kills, "vd": p.deaths, "vt": p.team})
+                     "kk": p.kills, "vd": p.deaths, "vt": p.team, "out": p.out})
+    check_war(room)
+    check_br(room)
 
 
 def assign_teams(room):
     players = list(room.players.values())
     random.shuffle(players)
     for i, p in enumerate(players):
-        if room.mode == "inf":
+        if room.mode in ("inf", "br"):
             p.team = 0
         elif room.teams_on():
             p.team = i % 2
@@ -398,6 +534,9 @@ def winning_team(room):
         return room.players[room.nuke_by].team
     if room.mode == "inf":
         return 0 if any(p.team == 0 for p in room.players.values()) else 1
+    if room.mode == "br":
+        left = {p.team for p in room.players.values() if not p.out}
+        return next(iter(left)) if len(left) == 1 else -1
     if dom_like(room.mode) or room.mode == "hp":
         a, b = room.scores
         return -1 if int(a) == int(b) else (0 if a > b else 1)
@@ -406,11 +545,20 @@ def winning_team(room):
 
 def end_match(room):
     room.state = "lobby"
+    if room.mode == "war":
+        # Last one standing first, then everyone else by how long they lasted.
+        order = sorted(room.players.values(), key=lambda x: (not x.alive, 0 if x.alive else -x.died_at, -x.kills))
+        standings = [p.public() for p in order]
+    elif room.mode == "br":
+        win = winning_team(room)
+        order = sorted(room.players.values(), key=lambda x: (x.team != win, x.out, -x.kills, x.deaths))
+        standings = [p.public() for p in order]
+    else:
+        standings = sorted((p.public() for p in room.players.values()),
+                           key=lambda x: (x["id"] != room.nuke_by, -x["kills"], x["deaths"]))
     for p in room.players.values():
         p.alive = False
         p.loaded = False
-    standings = sorted((p.public() for p in room.players.values()),
-                       key=lambda x: (x["id"] != room.nuke_by, -x["kills"], x["deaths"]))
     broadcast(room, {"t": "end", "players": standings, "nukeBy": room.nuke_by, "mode": room.mode,
                      "winTeam": winning_team(room), "scores": [int(x) for x in room.scores]})
     room.nuke_at = 0
@@ -426,9 +574,10 @@ def on_loaded(room, p):
         broadcast(room, {"t": "loadProgress", "loaded": done, "total": len(room.players)})
         check_all_loaded(room)
     elif room.state == "playing":
-        # Joined mid-match: drop straight in.
-        p.alive = True
+        # Joined mid-match: drop straight in (Warfare has no way back in, so they watch).
+        p.alive = room.mode != "war"
         p.hp = 100
+        p.died_at = now_ms()
         if room.mode == "dday":
             sizes = [sum(1 for x in humans(room) if x.team == t and x is not p) for t in (0, 1)]
             team = 0 if sizes[0] <= sizes[1] else 1
@@ -442,12 +591,18 @@ def on_loaded(room, p):
                 broadcast(room, {"t": "left", "id": same[0].id, "name": same[0].name}, p.id)
         elif room.mode == "inf":
             p.team = 1
+        elif room.mode == "br":
+            p.team = 0
+            p.air = True
+            if br_past_cutoff(room):
+                p.alive, p.out = False, True
         elif room.teams_on():
             sizes = [sum(1 for x in room.players.values() if x.team == t and x is not p) for t in (0, 1)]
             p.team = 0 if sizes[0] <= sizes[1] else 1
         broadcast(room, {"t": "team", "id": p.id, "team": p.team, "role": p.role}, p.id)
         send(p, go_msg(room))
-        broadcast(room, {"t": "spawned", "id": p.id}, p.id)
+        if p.alive:
+            broadcast(room, {"t": "spawned", "id": p.id}, p.id)
 
 
 def on_hit(room, p, m):
@@ -457,6 +612,9 @@ def on_hit(room, p, m):
     if not t or t is p or not p.alive or not t.alive:
         return
     if room.teams_on() and t.team == p.team:
+        return
+    # Battle royale: nobody shoots or gets shot from the plane or on the way down.
+    if room.mode == "br" and (p.air or t.air):
         return
     try:
         dmg = max(0, min(250, float(m.get("dmg", 0))))
@@ -472,12 +630,16 @@ def on_hit(room, p, m):
         p.kills += 1
         if room.mode == "inf" and t.team == 0:
             t.team = 1
+        mark_out(room, t)
         broadcast(room, {"t": "kill", "killer": p.id, "victim": t.id, "head": bool(m.get("head")),
-                         "w": str(m.get("w", ""))[:12], "kk": p.kills, "vd": t.deaths, "vt": t.team})
+                         "w": str(m.get("w", ""))[:12], "kk": p.kills, "vd": t.deaths, "vt": t.team, "out": t.out})
         if room.mode == "ffa" and p.kills >= SCORE_LIMIT["ffa"]:
             end_match(room)
         elif room.mode == "inf" and not any(x.team == 0 for x in room.players.values()):
             end_match(room)
+        else:
+            check_war(room)
+            check_br(room)
     else:
         broadcast(room, {"t": "damage", "target": t.id, "from": p.id, "hp": round(t.hp)})
 
@@ -522,7 +684,7 @@ def handle(p, m):
         leave_room(p)
     elif t == "setMap":
         if p.id == room.host_id and room.state == "lobby" and m.get("map") in MAPS \
-                and (m["map"] == "normandy") == (room.mode == "dday"):
+                and OWN_MAP.get(room.mode, m["map"]) == m["map"] and (room.mode in OWN_MAP or m["map"] not in OWN_MAP.values()):
             room.map = m["map"]
             room.reset_objectives()
             broadcast(room, lobby_state(room))
@@ -530,9 +692,9 @@ def handle(p, m):
         if p.id == room.host_id and room.state == "lobby" and m.get("mode") in MODES:
             room.mode = m["mode"]
             # D-Day has its own map; leaving D-Day goes back to a normal one.
-            if room.mode == "dday":
-                room.map = "normandy"
-            elif room.map == "normandy":
+            if room.mode in OWN_MAP:
+                room.map = OWN_MAP[room.mode]
+            elif room.map in OWN_MAP.values():
                 room.map = "harbor"
             room.reset_objectives()
             broadcast(room, lobby_state(room))
@@ -554,6 +716,7 @@ def handle(p, m):
             pos = m.get("p")
             if isinstance(pos, list) and len(pos) == 3 and all(isinstance(v, (int, float)) for v in pos):
                 p.pos = pos
+            p.air = m.get("r") in BR_AIR_FORMS
             broadcast(room, {"t": "state", "id": p.id, "p": m.get("p"), "y": m.get("y"), "x": m.get("x"),
                              "c": m.get("c"), "s": m.get("s"), "w": m.get("w"),
                              "r": m.get("r"), "z": m.get("z")}, p.id)
@@ -566,7 +729,7 @@ def handle(p, m):
         if room.state == "playing" and p.alive and m.get("k") in ("frag", "smoke", "bomb"):
             broadcast(room, {"t": "throw", "id": p.id, "k": m["k"], "p": m.get("p"), "v": m.get("v")}, p.id)
     elif t == "nuke":
-        if room.state == "playing" and room.mode != "inf" and not room.nuke_at and p.kills >= NUKE_KILLS:
+        if room.state == "playing" and room.mode not in ("inf", "war", "br") and not room.nuke_at and p.kills >= NUKE_KILLS:
             room.nuke_at = now_ms() + NUKE_DELAY_MS
             room.nuke_by = p.id
             broadcast(room, {"t": "nuke", "by": p.id, "at": room.nuke_at})
@@ -578,11 +741,18 @@ def handle(p, m):
     elif t in ("bstate", "bshot", "bhit", "brespawn", "bthrow", "bcrash"):
         handle_bots(room, p, t, m)
     elif t == "respawn":
-        if room.state == "playing" and not p.alive and p.loaded and now_ms() - p.died_at >= RESPAWN_MS - 400:
+        if room.state == "playing" and room.mode != "war" and not p.alive and p.loaded and can_respawn(room, p):
             p.alive = True
             p.hp = 100
             p.pos = None
+            p.air = True
             broadcast(room, {"t": "spawned", "id": p.id, "team": p.team})
+
+
+def can_respawn(room, p):
+    if room.mode != "br":
+        return now_ms() - p.died_at >= RESPAWN_MS - 400
+    return not p.out and not br_past_cutoff(room) and now_ms() - p.died_at >= BR_RESPAWN_MS - 400
 
 
 def set_role(room, p, role):
@@ -614,6 +784,7 @@ def handle_bots(room, p, t, m):
             b = room.players.get(e[0])
             if b and b.bot and b.alive:
                 b.pos = e[1:4]
+                b.air = len(e) > 9 and e[9] in BR_AIR_FORMS
                 out.append(e)
         shots = [x for x in (m.get("s") or [])[:400]
                  if isinstance(x, list) and len(x) == 8 and getattr(room.players.get(x[0]), "bot", False)]
@@ -631,10 +802,11 @@ def handle_bots(room, p, t, m):
         on_hit(room, b, m)
     elif t == "bcrash" and b.alive:
         kill_self(room, b, "crash")
-    elif t == "brespawn" and not b.alive and now_ms() - b.died_at >= RESPAWN_MS - 400:
+    elif t == "brespawn" and room.mode != "war" and not b.alive and can_respawn(room, b):
         b.alive = True
         b.hp = 100
         b.pos = None
+        b.air = True
         broadcast(room, {"t": "spawned", "id": b.id, "team": b.team})
 
 
@@ -652,10 +824,40 @@ async def tick():
                 update_objectives(room, n)
                 if room.state != "playing":
                     continue
+            if room.mode == "br" and room.br and n >= room.start_at:
+                update_br(room, n)
+                if room.state != "playing":
+                    continue
             for p in room.players.values():
                 if p.alive and p.hp < 100 and n - p.last_hit > REGEN_DELAY_MS:
                     p.hp = min(100, p.hp + 12)
                     send(p, {"t": "hp", "hp": round(p.hp)})
+
+
+def update_br(room, n):
+    tau = n - room.start_at
+    cx, cz, r = circle_at(room.br["kf"], tau)
+    dmg = gas_dps(room.br["kf"], tau) * TICK_S
+    for p in list(room.players.values()):
+        if not p.alive or p.air or not p.pos or math.hypot(p.pos[0] - cx, p.pos[2] - cz) <= r:
+            continue
+        p.hp -= dmg
+        p.last_hit = n
+        if p.hp <= 0:
+            kill_self(room, p, "gas")
+            if room.state != "playing":
+                return
+        elif not p.bot:
+            send(p, {"t": "damage", "target": p.id, "from": 0, "hp": round(p.hp)})
+    if not room.cutoff_done and tau >= room.br["cutoff"]:
+        room.cutoff_done = True
+        ids = [x.id for x in room.players.values() if not x.alive and not x.out]
+        for x in room.players.values():
+            if not x.alive:
+                x.out = True
+        if ids:
+            broadcast(room, {"t": "out", "ids": ids})
+        check_br(room)
 
 
 def zone_counts(room, x, z, r):
